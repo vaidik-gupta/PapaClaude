@@ -2,7 +2,13 @@
 
 Requires the Claude Code CLI on the host:
     npm install -g @anthropic-ai/claude-code
-and an ANTHROPIC_API_KEY.
+
+Two auth modes are supported:
+  * API key   — set ANTHROPIC_API_KEY (Console pay-as-you-go).
+  * OAuth     — leave ANTHROPIC_API_KEY unset and run `claude setup-token`
+                once; the SDK then uses your Claude subscription. A set
+                ANTHROPIC_API_KEY silently wins over OAuth, so for OAuth mode
+                the key must be absent (empty in the env file).
 """
 
 import os
@@ -19,9 +25,14 @@ from app.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-# The SDK reads ANTHROPIC_API_KEY from the environment; bridge it from settings.
-if settings.anthropic_api_key:
-    os.environ.setdefault("ANTHROPIC_API_KEY", settings.anthropic_api_key)
+# Bridge a real API key from settings into the env the SDK reads. A blank or
+# placeholder value is ignored so it can't clobber OAuth (`claude setup-token`).
+_key = settings.anthropic_api_key.strip()
+if _key and "your-key-here" not in _key:
+    os.environ.setdefault("ANTHROPIC_API_KEY", _key)
+    logger.info("Claude Agent SDK auth: API key")
+else:
+    logger.info("Claude Agent SDK auth: OAuth (subscription) via Claude Code CLI")
 
 DEFAULT_SYSTEM_PROMPT = "You are MyMaid, a helpful assistant."
 

@@ -5,9 +5,13 @@
 #
 # LocalStack emulates S3 + DynamoDB on port 4566.
 # MongoDB runs on 27017.
+#
+# NOTE: LocalStack pinned to 3.x — its community S3/DynamoDB services run
+# without a license token. The `latest` (2026.x) image refuses to boot without
+# a paid LocalStack auth token even for community services.
 services:
   localstack:
-    image: localstack/localstack:latest
+    image: localstack/localstack:3.8
     container_name: mymaid-localstack
     ports:
       - "4566:4566"

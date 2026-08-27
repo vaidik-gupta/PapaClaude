@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     # Anthropic / Claude Agent SDK
     anthropic_api_key: str = ""
 
+    # Service auth. USER_NAME is the admin account (the only one allowed to
+    # register new users); USER_KEY is its credential. Local defaults to
+    # admin/admin; in deployment USER_KEY comes from the auth-management service.
+    user_name: str = "admin"
+    user_key: str = "admin"
+
     # AWS (DynamoDB + S3). AWS_ENDPOINT_URL points at LocalStack in local dev,
     # and is empty in deployment so boto3 hits real AWS.
     aws_region: str = "us-east-1"

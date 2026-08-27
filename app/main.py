@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.resources import router as resources_router
 from app.api.routes import router
 from app.config import settings
 from app.db.mongodb import mongodb
@@ -30,6 +31,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="MyMaid", version="0.1.0", lifespan=lifespan)
 app.include_router(router)
+app.include_router(resources_router)
 
 
 def main() -> None:
