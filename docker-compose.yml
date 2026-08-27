@@ -1,0 +1,33 @@
+# Local development containers.
+# Config for these lives in .env.local (see .env.local.example).
+#
+#   docker compose up -d
+#
+# LocalStack emulates S3 + DynamoDB on port 4566.
+# MongoDB runs on 27017.
+services:
+  localstack:
+    image: localstack/localstack:latest
+    container_name: mymaid-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - SERVICES=s3,dynamodb
+      - DEBUG=0
+    volumes:
+      # Runs once the AWS services are ready and provisions the bucket + table.
+      - ./scripts/init_localstack.sh:/etc/localstack/init/ready.d/init.sh
+
+  mongodb:
+    image: mongo:7
+    container_name: mymaid-mongo
+    ports:
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=root
+      - MONGO_INITDB_ROOT_PASSWORD=example
+    volumes:
+      - mongo_data:/data/db
+
+volumes:
+  mongo_data:
