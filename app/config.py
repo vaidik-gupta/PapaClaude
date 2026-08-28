@@ -34,12 +34,12 @@ class Settings(BaseSettings):
     aws_access_key_id: str = ""
     aws_secret_access_key: str = ""
     aws_endpoint_url: str = ""
-    s3_bucket: str = "mymaid-local"
-    dynamodb_table: str = "mymaid-local"
+    s3_bucket: str = "papaclaude-local"
+    dynamodb_table: str = "papaclaude-local"
 
     # MongoDB
     mongodb_uri: str = "mongodb://localhost:27017"
-    mongodb_db: str = "mymaid"
+    mongodb_db: str = "papaclaude"
 
     # App
     app_host: str = "0.0.0.0"

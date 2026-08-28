@@ -22,14 +22,14 @@ logger = get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Starting MyMaid (environment=%s)", settings.environment)
+    logger.info("Starting PapaClaude (environment=%s)", settings.environment)
     await mongodb.connect()
     yield
     await mongodb.close()
-    logger.info("MyMaid shutdown complete")
+    logger.info("PapaClaude shutdown complete")
 
 
-app = FastAPI(title="MyMaid", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="PapaClaude", version="0.1.0", lifespan=lifespan)
 app.include_router(router)
 app.include_router(resources_router)
 

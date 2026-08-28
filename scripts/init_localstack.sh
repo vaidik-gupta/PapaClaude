@@ -4,8 +4,8 @@
 # Keep these names in sync with S3_BUCKET / DYNAMODB_TABLE in .env.local.
 set -euo pipefail
 
-BUCKET="${S3_BUCKET:-mymaid-local}"
-TABLE="${DYNAMODB_TABLE:-mymaid-local}"
+BUCKET="${S3_BUCKET:-papaclaude-local}"
+TABLE="${DYNAMODB_TABLE:-papaclaude-local}"
 
 echo "Creating S3 bucket: ${BUCKET}"
 awslocal s3 mb "s3://${BUCKET}" || true

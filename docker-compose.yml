@@ -12,7 +12,7 @@
 services:
   localstack:
     image: localstack/localstack:3.8
-    container_name: mymaid-localstack
+    container_name: papaclaude-localstack
     ports:
       - "4566:4566"
     environment:
@@ -24,7 +24,7 @@ services:
 
   mongodb:
     image: mongo:7
-    container_name: mymaid-mongo
+    container_name: papaclaude-mongo
     ports:
       - "27017:27017"
     environment:

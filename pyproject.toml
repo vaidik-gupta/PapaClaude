@@ -1,7 +1,7 @@
 [project]
-name = "mymaid"
+name = "papaclaude"
 version = "0.1.0"
-description = "MyMaid — a Claude Agent SDK service with FastAPI, DynamoDB/MongoDB/S3, and document loaders"
+description = "PapaClaude — a Claude Agent SDK service with FastAPI, DynamoDB/MongoDB/S3, and document loaders"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 dependencies = [

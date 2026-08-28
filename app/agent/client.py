@@ -34,7 +34,7 @@ if _key and "your-key-here" not in _key:
 else:
     logger.info("Claude Agent SDK auth: OAuth (subscription) via Claude Code CLI")
 
-DEFAULT_SYSTEM_PROMPT = "You are MyMaid, a helpful assistant."
+DEFAULT_SYSTEM_PROMPT = "You are PapaClaude, a helpful assistant."
 
 
 async def run_agent(prompt: str, system_prompt: str | None = None) -> str:
