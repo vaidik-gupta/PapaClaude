@@ -80,3 +80,32 @@ def test_delete_missing_or_not_owned_raises():
     m.add("alice", ["s3", "default"])
     with pytest.raises(ValueError):
         m.delete("bob", ["s3", "default"])  # not in bob's tree
+
+
+def test_get_and_list_data():
+    m, _ = make_manager()
+    m.add("alice", ["mongodb", "default"])
+    m.add("alice", ["mongodb", "default", "app"])
+    m.add("alice", ["mongodb", "default", "app", "users"])
+    m.add("alice", ["mongodb", "default", "app", "users", "u1"], data={"name": "Al"})
+    m.add("alice", ["mongodb", "default", "app", "users", "u2"], data={"name": "Bo"})
+
+    assert m.get_data("alice", ["mongodb", "default", "app", "users", "u1"]) == {"name": "Al"}
+    assert sorted(m.list_data("alice", ["mongodb", "default", "app", "users"])) == ["u1", "u2"]
+
+
+def test_get_data_rejects_non_leaf_and_unowned():
+    m, _ = make_manager()
+    m.add("alice", ["dynamodb", "default"])
+    m.add("alice", ["dynamodb", "default", "orders"])
+    m.add("alice", ["dynamodb", "default", "orders", "o1"], data={"total": 1})
+
+    # container is not a data leaf
+    with pytest.raises(ValueError):
+        m.get_data("alice", ["dynamodb", "default", "orders"])
+    # a data leaf is not a container
+    with pytest.raises(ValueError):
+        m.list_data("alice", ["dynamodb", "default", "orders", "o1"])
+    # not owned by bob
+    with pytest.raises(ValueError):
+        m.get_data("bob", ["dynamodb", "default", "orders", "o1"])

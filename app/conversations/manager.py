@@ -75,7 +75,7 @@ class ConversationManager:
         result: AgentEvent | None = None
         try:
             async for agent_event in self._run_turn(
-                prompt, resume_session_id=conv.sdk_session_id
+                prompt, owner=owner, resume_session_id=conv.sdk_session_id
             ):
                 event = await self._persist_event(
                     conversation_id, turn.id, event_index, agent_event
@@ -124,9 +124,11 @@ class ConversationManager:
             num_turns=payload.get("num_turns"),
             total_cost_usd=payload.get("total_cost_usd"),
         )
+        # A result flagged is_error (budget/max-turns/API error) is a failed turn.
+        status = TurnStatus.ERROR if payload.get("is_error") else TurnStatus.COMPLETE
         await self._store.update_turn(
             turn_id,
-            status=TurnStatus.COMPLETE.value,
+            status=status.value,
             result=turn_result.model_dump(mode="json"),
             completed_at=_now_iso(),
         )

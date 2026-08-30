@@ -44,6 +44,16 @@ class InfraProvider(ABC):
     def delete_data(self, owner: str, path: list[str]) -> None:
         ...
 
+    @abstractmethod
+    def get_data(self, owner: str, path: list[str]) -> dict | None:
+        """Read a single datum's payload; None if it isn't in the DB."""
+        ...
+
+    @abstractmethod
+    def list_data(self, owner: str, path: list[str]) -> list[str]:
+        """List the data names within a container path (source of truth: the DB)."""
+        ...
+
 
 class DynamoDBInfraProvider(InfraProvider):
     engine = Engine.DYNAMODB
@@ -91,6 +101,18 @@ class DynamoDBInfraProvider(InfraProvider):
         table = self._resource.Table(self._table_name(owner, path[:3]))
         table.delete_item(Key={"pk": path[-1]})
 
+    def get_data(self, owner, path) -> dict | None:
+        table = self._resource.Table(self._table_name(owner, path[:3]))
+        item = table.get_item(Key={"pk": path[-1]}).get("Item")
+        if item is None:
+            return None
+        item.pop("pk", None)  # pk is the datum's name, already known from the path
+        return item
+
+    def list_data(self, owner, path) -> list[str]:
+        table = self._resource.Table(self._table_name(owner, path))
+        return [i["pk"] for i in table.scan(ProjectionExpression="pk").get("Items", [])]
+
 
 class S3InfraProvider(InfraProvider):
     engine = Engine.S3
@@ -134,6 +156,19 @@ class S3InfraProvider(InfraProvider):
         bucket = self._bucket_name(owner, path[:3])
         self._client.delete_object(Bucket=bucket, Key=path[-1])
 
+    def get_data(self, owner, path) -> dict | None:
+        bucket = self._bucket_name(owner, path[:3])
+        try:
+            obj = self._client.get_object(Bucket=bucket, Key=path[-1])
+        except self._client.exceptions.NoSuchKey:
+            return None
+        return json.loads(obj["Body"].read())
+
+    def list_data(self, owner, path) -> list[str]:
+        bucket = self._bucket_name(owner, path)
+        objs = self._client.list_objects_v2(Bucket=bucket).get("Contents", [])
+        return [o["Key"] for o in objs]
+
 
 class MongoDBInfraProvider(InfraProvider):
     engine = Engine.MONGODB
@@ -173,6 +208,18 @@ class MongoDBInfraProvider(InfraProvider):
         coll = self._client[self._db_name(owner, path[:3])][path[3]]
         coll.delete_one({"_id": path[-1]})
 
+    def get_data(self, owner, path) -> dict | None:
+        coll = self._client[self._db_name(owner, path[:3])][path[3]]
+        doc = coll.find_one({"_id": path[-1]})
+        if doc is None:
+            return None
+        doc.pop("_id", None)  # _id is the datum's name, already known from the path
+        return doc
+
+    def list_data(self, owner, path) -> list[str]:
+        coll = self._client[self._db_name(owner, path[:3])][path[3]]
+        return [d["_id"] for d in coll.find({}, {"_id": 1})]
+
 
 class InMemoryInfraProvider(InfraProvider):
     """Placeholder provider that records ops instead of touching a real DB."""
@@ -193,6 +240,13 @@ class InMemoryInfraProvider(InfraProvider):
 
     def delete_data(self, owner, path) -> None:
         self.data.pop((owner, *path), None)
+
+    def get_data(self, owner, path) -> dict | None:
+        return self.data.get((owner, *path))
+
+    def list_data(self, owner, path) -> list[str]:
+        container = (owner, *path)
+        return [key[-1] for key in self.data if key[:-1] == container]
 
 
 def default_providers() -> dict[Engine, InfraProvider]:

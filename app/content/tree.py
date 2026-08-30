@@ -64,6 +64,20 @@ class ResourceNode:
             "children": [c.to_dict(layer + 1) for c in self.children.values()],
         }
 
+    @classmethod
+    def from_dict(cls, data: dict) -> ResourceNode:
+        node = cls(
+            name=data["name"],
+            engine=Engine(data["engine"]),
+            kind=NodeKind(data["kind"]),
+            owner=data.get("owner"),
+            permission=Permission(data["permission"]),
+            metadata=data.get("metadata", {}),
+        )
+        for child in data.get("children", []):
+            node.children[child["name"]] = ResourceNode.from_dict(child)
+        return node
+
 
 class ContentTree:
     """A single user's view of the resources they can reach."""
@@ -135,3 +149,11 @@ class ContentTree:
             "username": self.username,
             "roots": [r.to_dict(0) for r in self.roots.values()],
         }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> ContentTree:
+        tree = cls(data["username"])
+        tree.roots = {
+            Engine(r["engine"]): ResourceNode.from_dict(r) for r in data["roots"]
+        }
+        return tree

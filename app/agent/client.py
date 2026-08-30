@@ -28,6 +28,7 @@ from claude_agent_sdk import (
     query,
 )
 
+from app.agent.tools import SERVER_NAME, allowed_tool_names, build_content_server
 from app.config import settings
 from app.conversations.schema import EventType
 from app.logging_config import get_logger
@@ -124,10 +125,15 @@ def _translate(message: object) -> Iterator[AgentEvent]:
 async def run_turn(
     prompt: str,
     *,
+    owner: str,
     resume_session_id: str | None = None,
     system_prompt: str | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """Run one turn, resuming the given SDK session, and stream translated events.
+
+    The agent is sandboxed to a per-user content tool server: no built-in tools
+    (`tools=[]`), only our user-bound MCP tools, pre-approved and run without
+    prompting (`dontAsk`), and no ambient MCP config (`strict_mcp_config`).
 
     Exceptions from the SDK propagate to the caller (the manager records the
     turn as errored); this stays a pure translator of the happy path.
@@ -135,8 +141,13 @@ async def run_turn(
     options = ClaudeAgentOptions(
         system_prompt=system_prompt or DEFAULT_SYSTEM_PROMPT,
         resume=resume_session_id,
+        tools=[],  # no built-in tools (no Bash/Read/... on the host)
+        mcp_servers={SERVER_NAME: build_content_server(owner)},
+        allowed_tools=allowed_tool_names(),
+        permission_mode="dontAsk",
+        strict_mcp_config=True,
     )
-    logger.debug("Running turn (resume=%s)", resume_session_id)
+    logger.debug("Running turn for %s (resume=%s)", owner, resume_session_id)
 
     async for message in query(prompt=prompt, options=options):
         logger.deep_debug("Agent message: %r", message)  # type: ignore[attr-defined]

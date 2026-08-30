@@ -9,14 +9,15 @@ phantom node:
               store only their name)
   * delete -> validate, delete from infra, THEN remove the node
 
-ContentTrees live in an in-memory store for now (placeholder, like the auth
-service); a real store lands with the auth-management service later.
+ContentTrees are held in a per-user cache backed by a durable store; mutations
+are written back through a configurable strategy (see app.content.store).
 """
 
 from __future__ import annotations
 
 from app.content.infra import InfraProvider, default_providers
 from app.content.schema import schema_for
+from app.content.store import ContentTreeStore, MongoTreePersistence
 from app.content.tree import (
     ContentTree,
     Engine,
@@ -26,20 +27,6 @@ from app.content.tree import (
 from app.logging_config import get_logger
 
 logger = get_logger(__name__)
-
-
-class ContentTreeStore:
-    """In-memory username -> ContentTree store."""
-
-    def __init__(self) -> None:
-        self._trees: dict[str, ContentTree] = {}
-
-    def get_or_create(self, username: str) -> ContentTree:
-        tree = self._trees.get(username)
-        if tree is None:
-            tree = ContentTree(username)
-            self._trees[username] = tree
-        return tree
 
 
 class ResourceManager:
@@ -53,6 +40,10 @@ class ResourceManager:
 
     def tree_of(self, username: str) -> ContentTree:
         return self._store.get_or_create(username)
+
+    def reload(self, username: str) -> ContentTree:
+        """Refresh the user's cached tree from durable storage."""
+        return self._store.reload(username)
 
     def add(
         self,
@@ -82,8 +73,32 @@ class ResourceManager:
                 path, kind=kind, owner=username, permission=Permission.OWNER,
                 metadata=metadata or {},
             )
+        self._store.on_mutated(username)  # persist the tree change (write-back)
         logger.info("Added %s %s for %s", kind.value, path, username)
         return node
+
+    def get_data(self, username: str, path: list[str]) -> dict | None:
+        """Read a datum's payload from the DB. Validates ownership + that the
+        path is a data leaf (payloads never live in the tree)."""
+        engine = Engine(path[0])
+        schema = schema_for(engine)
+        node = self._store.get_or_create(username).get(path)
+        if node is None or node.owner != username:
+            raise ValueError("data not found or not owned by user")
+        if not schema.is_data(node.kind):
+            raise ValueError(f"{path} is not a data leaf")
+        return self._providers[engine].get_data(username, path)
+
+    def list_data(self, username: str, path: list[str]) -> list[str]:
+        """List the data names within an owned container, read from the DB."""
+        engine = Engine(path[0])
+        schema = schema_for(engine)
+        node = self._store.get_or_create(username).get(path)
+        if node is None or node.owner != username:
+            raise ValueError("container not found or not owned by user")
+        if schema.is_data(node.kind):
+            raise ValueError(f"{path} is a data leaf, not a container")
+        return self._providers[engine].list_data(username, path)
 
     def delete(self, username: str, path: list[str]) -> None:
         engine = Engine(path[0])
@@ -100,7 +115,11 @@ class ResourceManager:
         else:
             provider.delete_resource(username, path, node.kind)  # DB first
         tree.remove(path)
+        self._store.on_mutated(username)  # persist the tree change (write-back)
         logger.info("Deleted %s for %s", path, username)
 
 
-resource_manager = ResourceManager()
+# Production singleton: durable Mongo-backed tree persistence (write-through).
+resource_manager = ResourceManager(
+    store=ContentTreeStore(persistence=MongoTreePersistence())
+)

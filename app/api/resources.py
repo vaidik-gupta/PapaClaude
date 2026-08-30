@@ -62,6 +62,12 @@ def add_resource(body: AddBody, user: Annotated[User, Depends(require_user)]) ->
     return _add(user.username, [*body.parent_path, body.name], body.metadata, body.data)
 
 
+@router.post("/reload")
+def reload_tree(user: Annotated[User, Depends(require_user)]) -> dict:
+    """Re-read the user's content tree from durable storage into the cache."""
+    return resource_manager.reload(user.username).to_dict()
+
+
 @router.get("/{resource_path:path}", response_model=NodeResponse)
 def read_resource(
     resource_path: str, user: Annotated[User, Depends(require_user)]

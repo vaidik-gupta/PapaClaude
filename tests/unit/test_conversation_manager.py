@@ -68,7 +68,7 @@ def _fake_runner(events: list[AgentEvent]):
     """Build an agent_runner that records the resume id it was called with."""
     calls: list[str | None] = []
 
-    async def runner(prompt, *, resume_session_id=None, system_prompt=None):
+    async def runner(prompt, *, owner=None, resume_session_id=None, system_prompt=None):
         calls.append(resume_session_id)
         for ev in events:
             yield ev
@@ -129,7 +129,7 @@ async def test_second_turn_resumes_saved_session():
 async def test_error_mid_turn_records_error_event_and_status():
     store = FakeStore()
 
-    async def failing_runner(prompt, *, resume_session_id=None, system_prompt=None):
+    async def failing_runner(prompt, *, owner=None, resume_session_id=None, system_prompt=None):
         yield AgentEvent(EventType.ASSISTANT_TEXT, {"text": "partial"})
         raise RuntimeError("boom")
 
@@ -139,6 +139,19 @@ async def test_error_mid_turn_records_error_event_and_status():
     streamed = [e async for e in mgr.run_turn(conv.id, "ping", owner="u")]
     assert [e.type for e in streamed] == [EventType.ASSISTANT_TEXT, EventType.ERROR]
     assert streamed[-1].payload["message"] == "boom"
+
+    turn = (await store.get_turns(conv.id))[0]
+    assert turn.status is TurnStatus.ERROR
+
+
+async def test_result_flagged_is_error_marks_turn_error():
+    store = FakeStore()
+    result_ev = AgentEvent(EventType.RESULT, {"is_error": True, "text": "", "stop_reason": "budget"})
+    runner, _ = _fake_runner([result_ev])
+    mgr = ConversationManager(store=store, agent_runner=runner)
+
+    conv = await mgr.create_conversation(owner="u")
+    _ = [e async for e in mgr.run_turn(conv.id, "hi", owner="u")]
 
     turn = (await store.get_turns(conv.id))[0]
     assert turn.status is TurnStatus.ERROR

@@ -155,3 +155,16 @@ def test_validation_errors(client, admin_headers, dbs_available, unique):
 def test_resources_require_auth(client):
     assert client.post("/resources/db", json={"engine": "s3", "name": "x"}).status_code == 401
     assert client.get("/resources/dynamodb").status_code == 401
+    assert client.post("/resources/reload").status_code == 401
+
+
+def test_reload_tree_reflects_persisted_state(client, admin_headers, dbs_available, unique):
+    inst = unique  # a dynamodb instance is logical (no physical table to clean up)
+    try:
+        assert client.post("/resources/db", json={"engine": "dynamodb", "name": inst},
+                           headers=admin_headers).status_code == 200
+        tree = client.post("/resources/reload", headers=admin_headers).json()
+        dynamo = next(r for r in tree["roots"] if r["name"] == "dynamodb")
+        assert inst in {c["name"] for c in dynamo["children"]}
+    finally:
+        client.delete(f"/resources/dynamodb/{inst}", headers=admin_headers)
