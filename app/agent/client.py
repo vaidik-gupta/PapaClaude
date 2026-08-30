@@ -12,15 +12,24 @@ Two auth modes are supported:
 """
 
 import os
+from collections.abc import AsyncIterator, Iterator
+from dataclasses import dataclass
 
 from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
+    ResultMessage,
+    SystemMessage,
     TextBlock,
+    ThinkingBlock,
+    ToolResultBlock,
+    ToolUseBlock,
+    UserMessage,
     query,
 )
 
 from app.config import settings
+from app.conversations.schema import EventType
 from app.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -51,3 +60,85 @@ async def run_agent(prompt: str, system_prompt: str | None = None) -> str:
                     chunks.append(block.text)
 
     return "".join(chunks)
+
+
+@dataclass
+class AgentEvent:
+    """One translated item from the SDK stream. The manager wraps this into a
+    persisted domain Event (adding turn/conversation ids and an index)."""
+
+    type: EventType
+    payload: dict
+
+
+def _translate(message: object) -> Iterator[AgentEvent]:
+    """Map a single SDK message into zero or more domain-vocabulary events.
+
+    Pure and side-effect free so it can be unit-tested with constructed SDK
+    messages, no live query required. This is the one place the SDK's shape is
+    translated into our stable EventType vocabulary.
+    """
+    if isinstance(message, AssistantMessage):
+        for block in message.content:
+            if isinstance(block, TextBlock):
+                yield AgentEvent(EventType.ASSISTANT_TEXT, {"text": block.text})
+            elif isinstance(block, ThinkingBlock):
+                yield AgentEvent(EventType.THINKING, {"thinking": block.thinking})
+            elif isinstance(block, ToolUseBlock):
+                yield AgentEvent(
+                    EventType.TOOL_USE,
+                    {"id": block.id, "name": block.name, "input": block.input},
+                )
+    elif isinstance(message, UserMessage):
+        # Tool results are delivered back as user messages; the echoed prompt
+        # text is already stored on the Turn, so only tool results are logged.
+        content = message.content if isinstance(message.content, list) else []
+        for block in content:
+            if isinstance(block, ToolResultBlock):
+                yield AgentEvent(
+                    EventType.TOOL_RESULT,
+                    {
+                        "tool_use_id": block.tool_use_id,
+                        "content": block.content,
+                        "is_error": block.is_error,
+                    },
+                )
+    elif isinstance(message, SystemMessage):
+        yield AgentEvent(EventType.SYSTEM, {"subtype": message.subtype, "data": message.data})
+    elif isinstance(message, ResultMessage):
+        # Carries everything the manager needs to finalize the turn and, on the
+        # first turn, save the session pointer onto the conversation.
+        yield AgentEvent(
+            EventType.RESULT,
+            {
+                "session_id": message.session_id,
+                "stop_reason": message.stop_reason,
+                "num_turns": message.num_turns,
+                "total_cost_usd": message.total_cost_usd,
+                "is_error": message.is_error,
+                "text": message.result or "",
+            },
+        )
+
+
+async def run_turn(
+    prompt: str,
+    *,
+    resume_session_id: str | None = None,
+    system_prompt: str | None = None,
+) -> AsyncIterator[AgentEvent]:
+    """Run one turn, resuming the given SDK session, and stream translated events.
+
+    Exceptions from the SDK propagate to the caller (the manager records the
+    turn as errored); this stays a pure translator of the happy path.
+    """
+    options = ClaudeAgentOptions(
+        system_prompt=system_prompt or DEFAULT_SYSTEM_PROMPT,
+        resume=resume_session_id,
+    )
+    logger.debug("Running turn (resume=%s)", resume_session_id)
+
+    async for message in query(prompt=prompt, options=options):
+        logger.deep_debug("Agent message: %r", message)  # type: ignore[attr-defined]
+        for event in _translate(message):
+            yield event

@@ -10,9 +10,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api.conversations import router as conversations_router
 from app.api.resources import router as resources_router
 from app.api.routes import router
 from app.config import settings
+from app.conversations.manager import conversation_manager
 from app.db.mongodb import mongodb
 from app.logging_config import get_logger, setup_logging
 
@@ -24,6 +26,7 @@ logger = get_logger(__name__)
 async def lifespan(app: FastAPI):
     logger.info("Starting PapaClaude (environment=%s)", settings.environment)
     await mongodb.connect()
+    await conversation_manager.ensure_ready()
     yield
     await mongodb.close()
     logger.info("PapaClaude shutdown complete")
@@ -32,6 +35,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="PapaClaude", version="0.1.0", lifespan=lifespan)
 app.include_router(router)
 app.include_router(resources_router)
+app.include_router(conversations_router)
 
 
 def main() -> None:
