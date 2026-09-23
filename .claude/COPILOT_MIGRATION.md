@@ -29,7 +29,7 @@ The SDK coupling is confined to two files. Everything else is provider-neutral a
 - `run_turn(prompt, *, owner, resume_session_id) -> AsyncIterator[AgentEvent]`
 - `AgentEvent(type: EventType, payload: dict)`
 - the `RESULT` payload keys it reads in `_finalize`: `text`, `stop_reason`,
-  `num_turns`, `total_cost_usd`, `is_error`, `session_id`.
+  `num_turns`, `total_cost_req`, `is_error`, `session_id`.
 
 **Contract to preserve:** keep `AgentEvent`, `EventType`, and the `run_turn` signature
 exactly. The migration succeeds if the manager and API compile and run unchanged.
@@ -150,7 +150,7 @@ All names/fields below are **verified against `github-copilot-sdk==1.0.14`**:
   "session_id": our_session_id,      # the uuid we supplied to create_session (§2a)
   "stop_reason": last_finish_reason, # from AssistantUsageData.finish_reason
   "num_turns": None,                 # no direct equivalent
-  "total_cost_usd": total_cost,      # SUM of AssistantUsageData.cost (it IS exposed)
+  "total_cost_req": total_cost,      # SUM of AssistantUsageData.cost (it IS exposed)
   "is_error": bool(saw_error or SessionIdleData.aborted),
   "text": last_assistant_content,    # from the final AssistantMessageData.content
 }
@@ -201,7 +201,7 @@ changes from an in-process SDK MCP server to Copilot's native `Tool` list.
 
 ## 4. Schema / metadata impact
 
-- `TurnResult.total_cost_usd` **is** populated (`AssistantUsageData.cost`, summed over the
+- `TurnResult.total_cost_req` **is** populated (`AssistantUsageData.cost`, summed over the
   turn) — no schema change, keeps working. (Corrects the v1 assumption.)
 - `stop_reason` ← `AssistantUsageData.finish_reason`. `num_turns` → `None` (no clean
   source). Both already nullable — no schema change.

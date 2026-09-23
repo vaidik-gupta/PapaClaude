@@ -19,11 +19,13 @@ class Settings(BaseSettings):
     environment: str = "local"
     log_level: str = "INFO"
 
-    # GitHub Copilot SDK. github_token is a Copilot-subscription-backed GitHub
-    # token (gho_/ghu_/github_pat_); empty falls back to the logged-in user.
-    # copilot_model is the model id to run (see client.list_models()).
+    # GitHub Copilot SDK. Local dev (environment="local") uses the logged-in
+    # Copilot user via device login (sign in once with the Copilot/gh CLI) and
+    # ignores github_token. github_token is for non-local envs — see the TODO in
+    # app/agent/client.py. copilot_model is the model id to run (options come from
+    # client.list_models()).
     github_token: str = ""
-    copilot_model: str = "claude-sonnet-4.5"
+    copilot_model: str = "claude-sonnet-5"
 
     # Service auth. USER_NAME is the admin account (the only one allowed to
     # register new users); USER_KEY is its credential. Local defaults to

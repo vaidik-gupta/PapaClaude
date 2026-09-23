@@ -16,15 +16,12 @@ The manager, API, and persistence layers are unchanged.
 from __future__ import annotations
 
 import asyncio
+import os
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from uuid import uuid4
 
-from copilot import (
-    CopilotClient,
-    PermissionHandler,
-    ToolResult,  # noqa: F401  (re-exported convenience for callers/tests)
-)
+from copilot import CopilotClient, PermissionHandler
 from copilot.session import CopilotSession
 from copilot.session_events import (
     AssistantMessageData,
@@ -50,11 +47,6 @@ DEFAULT_SYSTEM_PROMPT = "You are PapaClaude, a helpful assistant."
 # send_and_wait defaults to a 60s timeout — far too short for an agent turn.
 TURN_TIMEOUT_SECONDS = 600.0
 
-logger.info(
-    "Copilot SDK auth: %s",
-    "GITHUB_TOKEN" if settings.github_token.strip() else "logged-in user",
-)
-
 
 @dataclass
 class AgentEvent:
@@ -71,12 +63,38 @@ _client: CopilotClient | None = None
 _client_lock = asyncio.Lock()
 
 
+# The Copilot CLI checks these before its stored OAuth token, so a stray value
+# would shadow the device-login session. Stripped from the runtime env in local.
+_TOKEN_ENV_VARS = ("GITHUB_TOKEN", "GH_TOKEN", "COPILOT_GITHUB_TOKEN")
+
+
+def _new_client() -> CopilotClient:
+    """Build the Copilot client for the current environment.
+
+    Local dev uses the logged-in Copilot user (device login via the Copilot/gh
+    CLI). Token env vars are stripped from the spawned runtime so a stray
+    GITHUB_TOKEN can't shadow the OAuth session — the CLI's credential order puts
+    GITHUB_TOKEN ahead of the stored login.
+
+    TODO(prod): use a Copilot-entitled, SSO-authorized token from the deployment
+    secret store for non-local envs. (A personal fine-grained PAT does not carry
+    an org Copilot seat, so it won't work for org-provisioned Copilot.)
+    """
+    if settings.environment == "local":
+        logger.info("Copilot SDK auth: logged-in user (local)")
+        env = {k: v for k, v in os.environ.items() if k not in _TOKEN_ENV_VARS}
+        return CopilotClient(use_logged_in_user=True, env=env)
+    token = settings.github_token.strip() or None
+    logger.info("Copilot SDK auth: %s", "GITHUB_TOKEN" if token else "logged-in user")
+    return CopilotClient(github_token=token)
+
+
 async def _get_client() -> CopilotClient:
     global _client
     if _client is None:
         async with _client_lock:
             if _client is None:
-                c = CopilotClient(github_token=settings.github_token.strip() or None)
+                c = _new_client()
                 await c.start()
                 _client = c
                 logger.debug("Copilot runtime started")
@@ -124,15 +142,15 @@ def _translate(data: object) -> Iterator[AgentEvent]:
 class _TurnState:
     """Accumulates the pieces of the terminal RESULT event across a turn.
 
-    Copilot reports the final answer, cost, and finish reason across several
-    events (assistant messages + per-call usage), so — unlike the Claude SDK's
-    single ResultMessage — the RESULT payload is built up here and emitted on
-    SessionIdleData.
+    Copilot reports the final answer, request cost, and finish reason across
+    several events (assistant messages + per-call usage), so — unlike the Claude
+    SDK's single ResultMessage — the RESULT payload is built up here and emitted on
+    SessionIdleData. Copilot's `cost` is a premium-request count, not dollars.
     """
 
     def __init__(self) -> None:
         self.text = ""
-        self.total_cost: float | None = None
+        self.total_req: float | None = None
         self.finish_reason: str | None = None
         self.aborted = False
         self.saw_error = False
@@ -142,7 +160,7 @@ class _TurnState:
             self.text = data.content  # last assistant message is the final answer
         elif isinstance(data, _UsageData):
             if data.cost is not None:
-                self.total_cost = (self.total_cost or 0.0) + data.cost
+                self.total_req = (self.total_req or 0.0) + data.cost
             if data.finish_reason is not None:
                 self.finish_reason = data.finish_reason
         elif isinstance(data, SessionErrorData):
@@ -155,7 +173,7 @@ class _TurnState:
             "session_id": session_id,
             "stop_reason": self.finish_reason,
             "num_turns": None,  # no clean Copilot equivalent
-            "total_cost_usd": self.total_cost,
+            "total_cost_req": self.total_req,
             "is_error": self.saw_error or self.aborted,
             "text": self.text,
         }

@@ -66,12 +66,12 @@ class Conversation(BaseModel):
 
 
 class TurnResult(BaseModel):
-    """The closing summary of a turn, taken from the SDK ResultMessage."""
+    """The closing summary of a turn, assembled from the SDK's end-of-turn events."""
 
     text: str = ""
     stop_reason: str | None = None
     num_turns: int | None = None
-    total_cost_usd: float | None = None
+    total_cost_req: float | None = None  # Copilot premium-request count, not dollars
 
 
 class Turn(BaseModel):

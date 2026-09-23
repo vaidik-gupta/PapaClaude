@@ -86,7 +86,7 @@ def test_turn_state_assembles_result_payload():
     assert payload["session_id"] == "sess-abc"
     assert payload["text"] == "the answer"
     assert payload["stop_reason"] == "stop"
-    assert payload["total_cost_usd"] == 0.01  # summed across usage events
+    assert payload["total_cost_req"] == 0.01  # summed across usage events
     assert payload["is_error"] is False
 
 
