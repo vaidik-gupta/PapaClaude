@@ -19,8 +19,11 @@ class Settings(BaseSettings):
     environment: str = "local"
     log_level: str = "INFO"
 
-    # Anthropic / Claude Agent SDK
-    anthropic_api_key: str = ""
+    # GitHub Copilot SDK. github_token is a Copilot-subscription-backed GitHub
+    # token (gho_/ghu_/github_pat_); empty falls back to the logged-in user.
+    # copilot_model is the model id to run (see client.list_models()).
+    github_token: str = ""
+    copilot_model: str = "claude-sonnet-4.5"
 
     # Service auth. USER_NAME is the admin account (the only one allowed to
     # register new users); USER_KEY is its credential. Local defaults to

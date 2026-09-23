@@ -1,6 +1,6 @@
 # PapaClaude
 
-A [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) service
+A [GitHub Copilot SDK](https://github.com/github/copilot-sdk) service
 built on FastAPI, with DynamoDB, MongoDB, and S3, plus LangChain document loaders.
 
 ## Stack
@@ -9,7 +9,7 @@ built on FastAPI, with DynamoDB, MongoDB, and S3, plus LangChain document loader
 | ----------------- | ------------------------------------------------- |
 | Package manager   | `uv`                                              |
 | Web server        | FastAPI + uvicorn                                 |
-| Agent             | `claude-agent-sdk`                                |
+| Agent             | `github-copilot-sdk`                              |
 | DynamoDB & S3     | `boto3` (LocalStack in local dev)                 |
 | MongoDB           | `motor` (async)                                   |
 | Document loaders  | `langchain-community`                             |
@@ -21,7 +21,7 @@ app/
 ├── main.py              FastAPI app + uvicorn entrypoint
 ├── config.py            pydantic-settings (loads .env then .env.local)
 ├── logging_config.py    INFO / DEBUG / DEEP_DEBUG logger
-├── agent/client.py      Claude Agent SDK wrapper
+├── agent/client.py      GitHub Copilot SDK wrapper
 ├── db/                  dynamodb.py, s3.py, mongodb.py
 ├── loaders/             LangChain document loaders
 └── api/routes.py        HTTP routes
@@ -35,7 +35,8 @@ Two layered env files (later overrides earlier):
 2. `.env.local` — local dev config pointing at the docker-compose containers.
 
 Both are gitignored. Templates are committed as `.env.example` and `.env.local.example`.
-Set your `ANTHROPIC_API_KEY` in `.env.local`.
+Set your `GITHUB_TOKEN` in `.env.local` (or leave it blank to use the logged-in
+GitHub user).
 
 ## Logging
 
@@ -50,13 +51,15 @@ logger.deep_debug("very verbose trace")
 
 ## Getting started
 
-Prerequisites: `uv`, Docker, and the Claude Code CLI (`npm install -g @anthropic-ai/claude-code`).
+Prerequisites: `uv` and Docker. The Copilot SDK auto-downloads its runtime from
+GitHub Releases into a local cache on first use (no manual install; needs network
+access, or set `COPILOT_CLI_PATH` to a preinstalled runtime).
 
 ```bash
 # 1. Install dependencies
 uv sync
 
-# 2. Copy env templates and set your ANTHROPIC_API_KEY
+# 2. Copy env templates and set your GITHUB_TOKEN
 cp .env.example .env
 cp .env.local.example .env.local
 

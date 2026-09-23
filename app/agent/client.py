@@ -1,66 +1,59 @@
-"""Thin wrapper around the Claude Agent SDK.
+"""Thin wrapper around the GitHub Copilot SDK.
 
-Requires the Claude Code CLI on the host:
-    npm install -g @anthropic-ai/claude-code
+Requires the Copilot runtime on the host (spawned by the SDK). Auth is a GitHub
+token backed by a Copilot subscription (`gho_` / `ghu_` / `github_pat_`), set as
+GITHUB_TOKEN; if unset the SDK falls back to the logged-in GitHub user.
 
-Two auth modes are supported:
-  * API key   — set ANTHROPIC_API_KEY (Console pay-as-you-go).
-  * OAuth     — leave ANTHROPIC_API_KEY unset and run `claude setup-token`
-                once; the SDK then uses your Claude subscription. A set
-                ANTHROPIC_API_KEY silently wins over OAuth, so for OAuth mode
-                the key must be absent (empty in the env file).
+The Copilot SDK is callback- and session-based, unlike the Claude SDK's async
+`query()`. This module hides both differences behind the same seams the rest of
+the app already depends on:
+  * `run_turn(...) -> AsyncIterator[AgentEvent]` — a callback→queue bridge turns
+    the SDK's `session.on(...)` stream back into an async iterator.
+  * `AgentEvent` / `EventType` — our stable vocabulary, mapped in `_translate`.
+The manager, API, and persistence layers are unchanged.
 """
 
-import os
+from __future__ import annotations
+
+import asyncio
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
+from uuid import uuid4
 
-from claude_agent_sdk import (
-    AssistantMessage,
-    ClaudeAgentOptions,
-    ResultMessage,
-    SystemMessage,
-    TextBlock,
-    ThinkingBlock,
-    ToolResultBlock,
-    ToolUseBlock,
-    UserMessage,
-    query,
+from copilot import (
+    CopilotClient,
+    PermissionHandler,
+    ToolResult,  # noqa: F401  (re-exported convenience for callers/tests)
+)
+from copilot.session import CopilotSession
+from copilot.session_events import (
+    AssistantMessageData,
+    AssistantReasoningData,
+    SessionErrorData,
+    SessionIdleData,
+    ToolExecutionCompleteData,
+    ToolExecutionStartData,
+)
+from copilot.session_events import (
+    AssistantUsageData as _UsageData,
 )
 
-from app.agent.tools import SERVER_NAME, allowed_tool_names, build_content_server
+from app.agent.tools import build_content_tools
 from app.config import settings
 from app.conversations.schema import EventType
 from app.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-# Bridge a real API key from settings into the env the SDK reads. A blank or
-# placeholder value is ignored so it can't clobber OAuth (`claude setup-token`).
-_key = settings.anthropic_api_key.strip()
-if _key and "your-key-here" not in _key:
-    os.environ.setdefault("ANTHROPIC_API_KEY", _key)
-    logger.info("Claude Agent SDK auth: API key")
-else:
-    logger.info("Claude Agent SDK auth: OAuth (subscription) via Claude Code CLI")
-
 DEFAULT_SYSTEM_PROMPT = "You are PapaClaude, a helpful assistant."
 
+# send_and_wait defaults to a 60s timeout — far too short for an agent turn.
+TURN_TIMEOUT_SECONDS = 600.0
 
-async def run_agent(prompt: str, system_prompt: str | None = None) -> str:
-    """Run a single-turn agent query and return the concatenated text response."""
-    options = ClaudeAgentOptions(system_prompt=system_prompt or DEFAULT_SYSTEM_PROMPT)
-    logger.debug("Running agent query")
-
-    chunks: list[str] = []
-    async for message in query(prompt=prompt, options=options):
-        logger.deep_debug("Agent message: %r", message)  # type: ignore[attr-defined]
-        if isinstance(message, AssistantMessage):
-            for block in message.content:
-                if isinstance(block, TextBlock):
-                    chunks.append(block.text)
-
-    return "".join(chunks)
+logger.info(
+    "Copilot SDK auth: %s",
+    "GITHUB_TOKEN" if settings.github_token.strip() else "logged-in user",
+)
 
 
 @dataclass
@@ -72,54 +65,133 @@ class AgentEvent:
     payload: dict
 
 
-def _translate(message: object) -> Iterator[AgentEvent]:
-    """Map a single SDK message into zero or more domain-vocabulary events.
+# --- Copilot client lifecycle (one lazily-started runtime for the process) ----
 
-    Pure and side-effect free so it can be unit-tested with constructed SDK
-    messages, no live query required. This is the one place the SDK's shape is
-    translated into our stable EventType vocabulary.
+_client: CopilotClient | None = None
+_client_lock = asyncio.Lock()
+
+
+async def _get_client() -> CopilotClient:
+    global _client
+    if _client is None:
+        async with _client_lock:
+            if _client is None:
+                c = CopilotClient(github_token=settings.github_token.strip() or None)
+                await c.start()
+                _client = c
+                logger.debug("Copilot runtime started")
+    return _client
+
+
+def _system_message(system_prompt: str | None) -> dict:
+    return {"mode": "replace", "content": system_prompt or DEFAULT_SYSTEM_PROMPT}
+
+
+# --- Event translation --------------------------------------------------------
+
+
+def _translate(data: object) -> Iterator[AgentEvent]:
+    """Map one Copilot session-event `data` object into zero or more domain
+    events. Pure and side-effect free so it can be unit-tested with constructed
+    event data, no live session required. The terminal RESULT event is assembled
+    separately by `_TurnState` because it aggregates across the whole turn.
     """
-    if isinstance(message, AssistantMessage):
-        for block in message.content:
-            if isinstance(block, TextBlock):
-                yield AgentEvent(EventType.ASSISTANT_TEXT, {"text": block.text})
-            elif isinstance(block, ThinkingBlock):
-                yield AgentEvent(EventType.THINKING, {"thinking": block.thinking})
-            elif isinstance(block, ToolUseBlock):
-                yield AgentEvent(
-                    EventType.TOOL_USE,
-                    {"id": block.id, "name": block.name, "input": block.input},
-                )
-    elif isinstance(message, UserMessage):
-        # Tool results are delivered back as user messages; the echoed prompt
-        # text is already stored on the Turn, so only tool results are logged.
-        content = message.content if isinstance(message.content, list) else []
-        for block in content:
-            if isinstance(block, ToolResultBlock):
-                yield AgentEvent(
-                    EventType.TOOL_RESULT,
-                    {
-                        "tool_use_id": block.tool_use_id,
-                        "content": block.content,
-                        "is_error": block.is_error,
-                    },
-                )
-    elif isinstance(message, SystemMessage):
-        yield AgentEvent(EventType.SYSTEM, {"subtype": message.subtype, "data": message.data})
-    elif isinstance(message, ResultMessage):
-        # Carries everything the manager needs to finalize the turn and, on the
-        # first turn, save the session pointer onto the conversation.
+    if isinstance(data, AssistantMessageData):
+        yield AgentEvent(EventType.ASSISTANT_TEXT, {"text": data.content})
+    elif isinstance(data, AssistantReasoningData):
+        yield AgentEvent(EventType.THINKING, {"thinking": data.content})
+    elif isinstance(data, ToolExecutionStartData):
         yield AgentEvent(
-            EventType.RESULT,
+            EventType.TOOL_USE,
+            {"id": data.tool_call_id, "name": data.tool_name, "input": data.arguments},
+        )
+    elif isinstance(data, ToolExecutionCompleteData):
+        content = data.result.content if (data.success and data.result) else None
+        if content is None and data.error is not None:
+            content = data.error.message
+        yield AgentEvent(
+            EventType.TOOL_RESULT,
             {
-                "session_id": message.session_id,
-                "stop_reason": message.stop_reason,
-                "num_turns": message.num_turns,
-                "total_cost_usd": message.total_cost_usd,
-                "is_error": message.is_error,
-                "text": message.result or "",
+                "tool_use_id": data.tool_call_id,
+                "content": content,
+                "is_error": not data.success,
             },
         )
+    elif isinstance(data, SessionErrorData):
+        yield AgentEvent(EventType.ERROR, {"message": data.message})
+
+
+class _TurnState:
+    """Accumulates the pieces of the terminal RESULT event across a turn.
+
+    Copilot reports the final answer, cost, and finish reason across several
+    events (assistant messages + per-call usage), so — unlike the Claude SDK's
+    single ResultMessage — the RESULT payload is built up here and emitted on
+    SessionIdleData.
+    """
+
+    def __init__(self) -> None:
+        self.text = ""
+        self.total_cost: float | None = None
+        self.finish_reason: str | None = None
+        self.aborted = False
+        self.saw_error = False
+
+    def observe(self, data: object) -> None:
+        if isinstance(data, AssistantMessageData):
+            self.text = data.content  # last assistant message is the final answer
+        elif isinstance(data, _UsageData):
+            if data.cost is not None:
+                self.total_cost = (self.total_cost or 0.0) + data.cost
+            if data.finish_reason is not None:
+                self.finish_reason = data.finish_reason
+        elif isinstance(data, SessionErrorData):
+            self.saw_error = True
+        elif isinstance(data, SessionIdleData):
+            self.aborted = bool(data.aborted)
+
+    def result_payload(self, session_id: str) -> dict:
+        return {
+            "session_id": session_id,
+            "stop_reason": self.finish_reason,
+            "num_turns": None,  # no clean Copilot equivalent
+            "total_cost_usd": self.total_cost,
+            "is_error": self.saw_error or self.aborted,
+            "text": self.text,
+        }
+
+
+# --- Turn execution -----------------------------------------------------------
+
+
+async def _open_session(
+    client: CopilotClient,
+    owner: str,
+    resume_session_id: str | None,
+    new_session_id: str,
+    system_prompt: str | None,
+) -> CopilotSession:
+    """Create a fresh session (bound to a session id we own) or resume one.
+
+    The agent is sandboxed to a per-user content tool surface: only our
+    user-bound tools, pre-approved so no permission prompt is raised.
+    """
+    kwargs = {
+        "model": settings.copilot_model or None,
+        "tools": build_content_tools(owner),
+        "system_message": _system_message(system_prompt),
+        "on_permission_request": PermissionHandler.approve_all,
+    }
+    if resume_session_id:
+        return await client.resume_session(resume_session_id, **kwargs)
+    return await client.create_session(session_id=new_session_id, **kwargs)
+
+
+@dataclass
+class _Failure:
+    """Sentinel pushed onto the bridge queue when the turn raises."""
+
+    exc: BaseException
 
 
 async def run_turn(
@@ -129,27 +201,64 @@ async def run_turn(
     resume_session_id: str | None = None,
     system_prompt: str | None = None,
 ) -> AsyncIterator[AgentEvent]:
-    """Run one turn, resuming the given SDK session, and stream translated events.
+    """Run one turn, resuming the given session, and stream translated events.
 
-    The agent is sandboxed to a per-user content tool server: no built-in tools
-    (`tools=[]`), only our user-bound MCP tools, pre-approved and run without
-    prompting (`dontAsk`), and no ambient MCP config (`strict_mcp_config`).
-
-    Exceptions from the SDK propagate to the caller (the manager records the
-    turn as errored); this stays a pure translator of the happy path.
+    We own the session id: on the first turn a uuid is generated and supplied to
+    `create_session`, then emitted in the RESULT event so the manager persists it
+    and resumes it next turn. Exceptions from the SDK propagate to the caller
+    (the manager records the turn as errored).
     """
-    options = ClaudeAgentOptions(
-        system_prompt=system_prompt or DEFAULT_SYSTEM_PROMPT,
-        resume=resume_session_id,
-        tools=[],  # no built-in tools (no Bash/Read/... on the host)
-        mcp_servers={SERVER_NAME: build_content_server(owner)},
-        allowed_tools=allowed_tool_names(),
-        permission_mode="dontAsk",
-        strict_mcp_config=True,
-    )
+    client = await _get_client()
+    session_id = resume_session_id or uuid4().hex
+    queue: asyncio.Queue[AgentEvent | _Failure | None] = asyncio.Queue()
+    state = _TurnState()
+
+    def on_event(event) -> None:
+        data = event.data
+        for ev in _translate(data):
+            queue.put_nowait(ev)
+        state.observe(data)
+        if isinstance(data, SessionIdleData):
+            queue.put_nowait(AgentEvent(EventType.RESULT, state.result_payload(session_id)))
+
+    session = await _open_session(client, owner, resume_session_id, session_id, system_prompt)
     logger.debug("Running turn for %s (resume=%s)", owner, resume_session_id)
 
-    async for message in query(prompt=prompt, options=options):
-        logger.deep_debug("Agent message: %r", message)  # type: ignore[attr-defined]
-        for event in _translate(message):
-            yield event
+    async def _drive() -> None:
+        try:
+            await session.send_and_wait(prompt, timeout=TURN_TIMEOUT_SECONDS)
+        except BaseException as exc:  # noqa: BLE001 — relay to the consumer verbatim
+            queue.put_nowait(_Failure(exc))
+        finally:
+            queue.put_nowait(None)  # always terminate the stream
+
+    async with session:
+        session.on(on_event)
+        drive_task = asyncio.create_task(_drive())
+        try:
+            while (item := await queue.get()) is not None:
+                if isinstance(item, _Failure):
+                    raise item.exc
+                yield item
+        finally:
+            await drive_task
+
+
+async def run_agent(prompt: str, system_prompt: str | None = None) -> str:
+    """Run a single-turn, tool-less query and return the assistant's text."""
+    client = await _get_client()
+    chunks: list[str] = []
+
+    def on_event(event) -> None:
+        if isinstance(event.data, AssistantMessageData):
+            chunks.append(event.data.content)
+
+    session = await client.create_session(
+        model=settings.copilot_model or None,
+        system_message=_system_message(system_prompt),
+        on_permission_request=PermissionHandler.approve_all,
+    )
+    async with session:
+        session.on(on_event)
+        await session.send_and_wait(prompt, timeout=TURN_TIMEOUT_SECONDS)
+    return "".join(chunks)
