@@ -17,6 +17,21 @@ from app.conversations.schema import (
     TurnStatus,
 )
 from app.conversations.store import ConversationStore
+from app.personas.schema import Manifest, Role
+
+
+class FakeRegistry:
+    """Minimal registry exposing the default parent/child manifests the manager
+    resolves on create."""
+
+    def __init__(self) -> None:
+        self._manifests = {
+            "default-parent": Manifest(name="default-parent", role=Role.PARENT),
+            "default-child": Manifest(name="default-child", role=Role.CHILD),
+        }
+
+    def get(self, name: str) -> Manifest:
+        return self._manifests[name]
 
 
 class FakeStore(ConversationStore):
@@ -32,8 +47,16 @@ class FakeStore(ConversationStore):
     async def get_conversation(self, conversation_id: str) -> Conversation | None:
         return self.conversations.get(conversation_id)
 
-    async def list_conversations(self, owner: str) -> list[Conversation]:
-        return [c for c in self.conversations.values() if c.owner == owner]
+    async def list_conversations(
+        self, owner: str, role: str | None = None
+    ) -> list[Conversation]:
+        convs = [c for c in self.conversations.values() if c.owner == owner]
+        if role is not None:
+            convs = [c for c in convs if c.role.value == role]
+        return convs
+
+    async def get_children(self, parent_id: str) -> list[Conversation]:
+        return [c for c in self.conversations.values() if c.parent_id == parent_id]
 
     async def update_conversation(self, conversation_id: str, **fields) -> None:
         # Re-validate the merged doc so JSON-safe update fields coerce back to
@@ -68,7 +91,7 @@ def _fake_runner(events: list[AgentEvent]):
     """Build an agent_runner that records the resume id it was called with."""
     calls: list[str | None] = []
 
-    async def runner(prompt, *, owner=None, resume_session_id=None, system_prompt=None):
+    async def runner(prompt, *, owner=None, resume_session_id=None, system_prompt=None, **kw):
         calls.append(resume_session_id)
         for ev in events:
             yield ev
@@ -85,7 +108,7 @@ async def test_run_turn_persists_streams_and_finalizes():
                                       "stop_reason": "end_turn"}),
     ]
     runner, calls = _fake_runner(events)
-    mgr = ConversationManager(store=store, agent_runner=runner)
+    mgr = ConversationManager(store=store, agent_runner=runner, registry=FakeRegistry())
 
     conv = await mgr.create_conversation(owner="u")
     streamed = [e async for e in mgr.run_turn(conv.id, "ping", owner="u")]
@@ -115,7 +138,7 @@ async def test_second_turn_resumes_saved_session():
     store = FakeStore()
     result_ev = AgentEvent(EventType.RESULT, {"session_id": "sess-1", "text": "ok"})
     runner, calls = _fake_runner([result_ev])
-    mgr = ConversationManager(store=store, agent_runner=runner)
+    mgr = ConversationManager(store=store, agent_runner=runner, registry=FakeRegistry())
 
     conv = await mgr.create_conversation(owner="u")
     _ = [e async for e in mgr.run_turn(conv.id, "first", owner="u")]
@@ -129,11 +152,12 @@ async def test_second_turn_resumes_saved_session():
 async def test_error_mid_turn_records_error_event_and_status():
     store = FakeStore()
 
-    async def failing_runner(prompt, *, owner=None, resume_session_id=None, system_prompt=None):
+    async def failing_runner(prompt, *, owner=None, resume_session_id=None, system_prompt=None,
+                             **kw):
         yield AgentEvent(EventType.ASSISTANT_TEXT, {"text": "partial"})
         raise RuntimeError("boom")
 
-    mgr = ConversationManager(store=store, agent_runner=failing_runner)
+    mgr = ConversationManager(store=store, agent_runner=failing_runner, registry=FakeRegistry())
     conv = await mgr.create_conversation(owner="u")
 
     streamed = [e async for e in mgr.run_turn(conv.id, "ping", owner="u")]
@@ -148,7 +172,7 @@ async def test_result_flagged_is_error_marks_turn_error():
     store = FakeStore()
     result_ev = AgentEvent(EventType.RESULT, {"is_error": True, "text": "", "stop_reason": "budget"})
     runner, _ = _fake_runner([result_ev])
-    mgr = ConversationManager(store=store, agent_runner=runner)
+    mgr = ConversationManager(store=store, agent_runner=runner, registry=FakeRegistry())
 
     conv = await mgr.create_conversation(owner="u")
     _ = [e async for e in mgr.run_turn(conv.id, "hi", owner="u")]
@@ -160,7 +184,7 @@ async def test_result_flagged_is_error_marks_turn_error():
 async def test_run_turn_rejects_wrong_owner():
     store = FakeStore()
     runner, _ = _fake_runner([])
-    mgr = ConversationManager(store=store, agent_runner=runner)
+    mgr = ConversationManager(store=store, agent_runner=runner, registry=FakeRegistry())
     conv = await mgr.create_conversation(owner="owner")
 
     with pytest.raises(ValueError, match="not found"):

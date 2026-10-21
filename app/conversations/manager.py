@@ -25,6 +25,8 @@ from app.conversations.schema import (
 )
 from app.conversations.store import ConversationStore, MongoConversationStore
 from app.logging_config import get_logger
+from app.personas.registry import ManifestRegistry, manifest_registry
+from app.personas.schema import Role
 
 logger = get_logger(__name__)
 
@@ -34,18 +36,85 @@ class ConversationManager:
         self,
         store: ConversationStore | None = None,
         agent_runner=run_turn,
+        registry: ManifestRegistry | None = None,
     ) -> None:
         self._store = store or MongoConversationStore()
         self._run_turn = agent_runner
+        self._registry = registry or manifest_registry
 
     async def ensure_ready(self) -> None:
         await self._store.ensure_ready()
 
-    async def create_conversation(self, owner: str, title: str | None = None) -> Conversation:
-        return await self._store.create_conversation(Conversation(owner=owner, title=title))
+    async def create_conversation(
+        self, owner: str, title: str | None = None, manifest_name: str = "default-parent"
+    ) -> Conversation:
+        """Create a Papa (role=parent) conversation, snapshotting its manifest.
 
-    async def list_conversations(self, owner: str) -> list[Conversation]:
-        return await self._store.list_conversations(owner)
+        Raises ValueError if the manifest does not resolve to a role=parent
+        persona (the project endpoint is parent-only).
+        """
+        manifest = self._registry.get(manifest_name)
+        if manifest.role is not Role.PARENT:
+            raise ValueError(f"manifest {manifest_name!r} is not a parent manifest")
+        conv = Conversation(
+            owner=owner,
+            title=title,
+            role=Role.PARENT,
+            manifest_name=manifest_name,
+            persona=manifest.model_copy(deep=True),
+        )
+        return await self._store.create_conversation(conv)
+
+    async def create_child(
+        self,
+        parent_id: str,
+        owner: str,
+        manifest_name: str,
+        title: str | None = None,
+        task: str | None = None,
+    ) -> Conversation:
+        """Create a role=child conversation under `parent_id`, snapshotting its
+        manifest. `task` is the spawn context (null when added via the UI).
+
+        Raises ValueError if the parent is missing/foreign or the manifest is not
+        a child manifest.
+        """
+        await self.get_conversation(parent_id, owner)  # ownership + existence
+        manifest = self._registry.get(manifest_name)
+        if manifest.role is not Role.CHILD:
+            raise ValueError(f"manifest {manifest_name!r} is not a child manifest")
+        conv = Conversation(
+            owner=owner,
+            title=title,
+            role=Role.CHILD,
+            parent_id=parent_id,
+            manifest_name=manifest_name,
+            task=task,
+            persona=manifest.model_copy(deep=True),
+        )
+        return await self._store.create_conversation(conv)
+
+    async def get_children(self, parent_id: str, owner: str) -> list[Conversation]:
+        await self.get_conversation(parent_id, owner)  # ownership + existence
+        return await self._store.get_children(parent_id)
+
+    async def update_persona(
+        self, conversation_id: str, owner: str, patch: dict
+    ) -> Conversation:
+        """Patch the conversation's bound persona snapshot. `name` and `role` are
+        immutable on a snapshot and ignored. Takes effect from the next turn."""
+        conv = await self.get_conversation(conversation_id, owner)
+        fields = {k: v for k, v in patch.items() if k not in ("name", "role") and v is not None}
+        persona = conv.persona.model_copy(update=fields)
+        await self._store.update_conversation(
+            conversation_id, persona=persona.model_dump(mode="json")
+        )
+        return await self.get_conversation(conversation_id, owner)
+
+    async def list_conversations(
+        self, owner: str, role: str | None = None
+    ) -> list[Conversation]:
+        return await self._store.list_conversations(owner, role)
 
     async def get_conversation(self, conversation_id: str, owner: str) -> Conversation:
         conv = await self._store.get_conversation(conversation_id)
@@ -75,7 +144,13 @@ class ConversationManager:
         result: AgentEvent | None = None
         try:
             async for agent_event in self._run_turn(
-                prompt, owner=owner, resume_session_id=conv.sdk_session_id
+                prompt,
+                owner=owner,
+                resume_session_id=conv.sdk_session_id,
+                system_prompt=conv.persona.system_prompt or None,
+                allowed_tools=conv.persona.allowed_tools,
+                role=conv.role.value,
+                conversation_id=conv.id,
             ):
                 event = await self._persist_event(
                     conversation_id, turn.id, event_index, agent_event

@@ -9,8 +9,10 @@ or:
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.conversations import router as conversations_router
+from app.api.personas import router as personas_router
 from app.api.resources import router as resources_router
 from app.api.routes import router
 from app.config import settings
@@ -33,9 +35,19 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="PapaClaude", version="0.1.0", lifespan=lifespan)
+
+# Allow the local frontend dev servers (Vite / CRA) to call the API.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(router)
 app.include_router(resources_router)
 app.include_router(conversations_router)
+app.include_router(personas_router)
 
 
 def main() -> None:

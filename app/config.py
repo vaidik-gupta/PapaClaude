@@ -50,5 +50,9 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     app_port: int = 8000
 
+    # Persona manifest library (YAML files on disk). Defaults to .manifests/ at
+    # the repo root.
+    manifests_dir: str = ".manifests"
+
 
 settings = Settings()

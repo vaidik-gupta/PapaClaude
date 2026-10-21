@@ -31,7 +31,14 @@ class ConversationStore(ABC):
     async def get_conversation(self, conversation_id: str) -> Conversation | None: ...
 
     @abstractmethod
-    async def list_conversations(self, owner: str) -> list[Conversation]: ...
+    async def list_conversations(
+        self, owner: str, role: str | None = None
+    ) -> list[Conversation]:
+        """Conversations for an owner, optionally filtered by role."""
+
+    @abstractmethod
+    async def get_children(self, parent_id: str) -> list[Conversation]:
+        """Child conversations of a parent, ordered by creation time."""
 
     @abstractmethod
     async def update_conversation(self, conversation_id: str, **fields) -> None:
@@ -78,6 +85,7 @@ class MongoConversationStore(ConversationStore):
         """Create the lookup indexes the queries below rely on. Idempotent."""
         await self._db[self.CONVERSATIONS].create_index("id", unique=True)
         await self._db[self.CONVERSATIONS].create_index("owner")
+        await self._db[self.CONVERSATIONS].create_index("parent_id")
         await self._db[self.TURNS].create_index("id", unique=True)
         await self._db[self.TURNS].create_index([("conversation_id", 1), ("index", 1)])
         await self._db[self.EVENTS].create_index("id", unique=True)
@@ -104,8 +112,17 @@ class MongoConversationStore(ConversationStore):
         doc = self._strip(await self._db[self.CONVERSATIONS].find_one({"id": conversation_id}))
         return Conversation(**doc) if doc else None
 
-    async def list_conversations(self, owner: str) -> list[Conversation]:
-        cursor = self._db[self.CONVERSATIONS].find({"owner": owner}).sort("created_at", 1)
+    async def list_conversations(
+        self, owner: str, role: str | None = None
+    ) -> list[Conversation]:
+        query: dict = {"owner": owner}
+        if role is not None:
+            query["role"] = role
+        cursor = self._db[self.CONVERSATIONS].find(query).sort("created_at", 1)
+        return [Conversation(**self._strip(d)) async for d in cursor]
+
+    async def get_children(self, parent_id: str) -> list[Conversation]:
+        cursor = self._db[self.CONVERSATIONS].find({"parent_id": parent_id}).sort("created_at", 1)
         return [Conversation(**self._strip(d)) async for d in cursor]
 
     async def update_conversation(self, conversation_id: str, **fields) -> None:

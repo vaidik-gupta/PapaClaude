@@ -21,6 +21,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from app.personas.schema import PersonaSnapshot, Role
+
 
 def _now() -> datetime:
     return datetime.now(UTC)
@@ -54,6 +56,12 @@ class EventType(str, Enum):
     ERROR = "error"
 
 
+def _default_persona() -> PersonaSnapshot:
+    """A placeholder snapshot for direct construction; the manager overwrites it
+    with the real manifest snapshot on create."""
+    return PersonaSnapshot(name="default-parent", role=Role.PARENT)
+
+
 class Conversation(BaseModel):
     id: str = Field(default_factory=_uuid)
     owner: str
@@ -63,6 +71,13 @@ class Conversation(BaseModel):
     status: ConversationStatus = ConversationStatus.ACTIVE
     created_at: datetime = Field(default_factory=_now)
     updated_at: datetime = Field(default_factory=_now)
+
+    # Persona / project fields.
+    role: Role = Role.PARENT
+    parent_id: str | None = None  # set on children -> their Papa
+    manifest_name: str = "default-parent"  # source manifest
+    task: str | None = None  # context string from spawn_child; null via UI button
+    persona: PersonaSnapshot = Field(default_factory=_default_persona)
 
 
 class TurnResult(BaseModel):

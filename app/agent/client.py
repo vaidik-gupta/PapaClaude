@@ -35,7 +35,7 @@ from copilot.session_events import (
     AssistantUsageData as _UsageData,
 )
 
-from app.agent.tools import build_content_tools
+from app.agent.tools import build_content_tools, build_spawn_child_tool
 from app.config import settings
 from app.conversations.schema import EventType
 from app.logging_config import get_logger
@@ -182,12 +182,27 @@ class _TurnState:
 # --- Turn execution -----------------------------------------------------------
 
 
+def _build_tools(
+    owner: str,
+    allowed_tools: list[str] | None,
+    role: str | None,
+    conversation_id: str | None,
+) -> list:
+    """Assemble the session's tools: the persona's allowed content tools, plus
+    the parent-only `spawn_child` tool for a parent conversation."""
+    tools = build_content_tools(owner, allowed=allowed_tools)
+    if role == "parent" and conversation_id is not None:
+        tools.append(build_spawn_child_tool(owner, conversation_id))
+    return tools
+
+
 async def _open_session(
     client: CopilotClient,
     owner: str,
     resume_session_id: str | None,
     new_session_id: str,
     system_prompt: str | None,
+    tools: list,
 ) -> CopilotSession:
     """Create a fresh session (bound to a session id we own) or resume one.
 
@@ -196,7 +211,7 @@ async def _open_session(
     """
     kwargs = {
         "model": settings.copilot_model or None,
-        "tools": build_content_tools(owner),
+        "tools": tools,
         "system_message": _system_message(system_prompt),
         "on_permission_request": PermissionHandler.approve_all,
     }
@@ -218,6 +233,9 @@ async def run_turn(
     owner: str,
     resume_session_id: str | None = None,
     system_prompt: str | None = None,
+    allowed_tools: list[str] | None = None,
+    role: str | None = None,
+    conversation_id: str | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """Run one turn, resuming the given session, and stream translated events.
 
@@ -239,7 +257,10 @@ async def run_turn(
         if isinstance(data, SessionIdleData):
             queue.put_nowait(AgentEvent(EventType.RESULT, state.result_payload(session_id)))
 
-    session = await _open_session(client, owner, resume_session_id, session_id, system_prompt)
+    tools = _build_tools(owner, allowed_tools, role, conversation_id)
+    session = await _open_session(
+        client, owner, resume_session_id, session_id, system_prompt, tools
+    )
     logger.debug("Running turn for %s (resume=%s)", owner, resume_session_id)
 
     async def _drive() -> None:

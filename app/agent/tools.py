@@ -40,9 +40,80 @@ def _err(msg: str) -> ToolResult:
     return ToolResult(text_result_for_llm=msg, result_type="failure", error=msg)
 
 
-def build_content_tools(owner: str, manager: ResourceManager | None = None) -> list[Tool]:
-    """Build the Copilot tools whose handlers all act as `owner`."""
-    return _content_tools(owner, manager or resource_manager)
+def build_content_tools(
+    owner: str,
+    manager: ResourceManager | None = None,
+    allowed: list[str] | None = None,
+) -> list[Tool]:
+    """Build the Copilot content tools whose handlers all act as `owner`.
+
+    `allowed` restricts the set to the named tools (a persona's allowed_tools);
+    None means all content tools.
+    """
+    tools = _content_tools(owner, manager or resource_manager)
+    if allowed is not None:
+        allow = set(allowed)
+        tools = [t for t in tools if t.name in allow]
+    return tools
+
+
+def build_spawn_child_tool(owner: str, parent_id: str) -> Tool:
+    """Build the parent-only `spawn_child` tool.
+
+    Its handler calls the conversation manager to create a role=child
+    conversation under `parent_id`, seeding the child with `context` as its task.
+    The manager is imported lazily inside the handler to avoid a circular import
+    (manager -> client -> tools -> manager).
+    """
+
+    async def spawn_child(inv: ToolInvocation) -> ToolResult:
+        from app.conversations.manager import conversation_manager
+
+        args = inv.arguments
+        manifest_name = args["manifest_name"]
+        context = args.get("context")
+        title = args.get("title")
+        try:
+            child = await conversation_manager.create_child(
+                parent_id=parent_id,
+                owner=owner,
+                manifest_name=manifest_name,
+                title=title,
+                task=context,
+            )
+        except ValueError as exc:
+            return _err(str(exc))
+        except Exception as exc:
+            logger.exception("spawn_child failed")
+            return _err(f"infra error: {exc}")
+        return _ok(
+            {
+                "child_id": child.id,
+                "title": child.title,
+                "manifest_name": child.manifest_name,
+            }
+        )
+
+    return Tool(
+        name="spawn_child",
+        description=(
+            "Spawn a focused child agent under this project to carry out a scoped "
+            "subtask. `manifest_name` picks a child persona from the library; "
+            "`context` is a self-contained instruction string seeded as the child's "
+            "task (the only channel it receives); optional `title` names the child."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "manifest_name": {"type": "string"},
+                "context": {"type": "string"},
+                "title": {"type": "string"},
+            },
+            "required": ["manifest_name", "context"],
+        },
+        handler=spawn_child,
+        skip_permission=True,
+    )
 
 
 def _content_tools(owner: str, mgr: ResourceManager) -> list[Tool]:

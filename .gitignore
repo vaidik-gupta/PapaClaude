@@ -13,6 +13,11 @@ uv.lock
 .env
 .env.local
 
+# Node / frontend
+node_modules/
+dist/
+*.tsbuildinfo
+
 # OS / editor
 .DS_Store
 .idea/
