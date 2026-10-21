@@ -130,3 +130,49 @@ export interface SpawnChildResult {
   title: string | null;
   manifest_name: string;
 }
+
+// ---- Resources (content tree) ----
+
+export type ResourceEngine = 'dynamodb' | 's3' | 'mongodb';
+
+export const RESOURCE_ENGINES: ResourceEngine[] = ['dynamodb', 's3', 'mongodb'];
+
+export type NodeKind =
+  | 'engine'
+  | 'group'
+  | 'table'
+  | 'bucket'
+  | 'database'
+  | 'collection'
+  | 'item'
+  | 'object'
+  | 'document';
+
+// The data-leaf kind per engine (lowest granularity; holds a payload).
+export const DATA_KINDS: NodeKind[] = ['item', 'object', 'document'];
+
+export interface ResourceNode {
+  name: string;
+  engine: ResourceEngine;
+  kind: NodeKind;
+  owner: string | null;
+  permission: 'system' | 'owner';
+  metadata: Record<string, unknown>;
+  layer: number;
+  children: ResourceNode[];
+}
+
+export interface ContentTreeDto {
+  username: string;
+  roots: ResourceNode[];
+}
+
+export interface DataResponse {
+  path: string[];
+  data: Record<string, unknown> | null;
+}
+
+export interface NodeResponse {
+  path: string[];
+  node: ResourceNode;
+}

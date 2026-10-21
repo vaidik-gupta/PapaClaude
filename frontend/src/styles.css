@@ -523,3 +523,110 @@ label {
   display: flex;
   gap: 6px;
 }
+
+/* ---- Top nav (Chat / Resources) ---- */
+.topbar .nav {
+  display: flex;
+  gap: 4px;
+  margin-left: 8px;
+}
+.navbtn {
+  padding: 5px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  color: var(--text-muted);
+  background: transparent;
+  font-size: 13px;
+}
+.navbtn:hover {
+  color: var(--text);
+  background: var(--bg-elev-2);
+}
+.navbtn.active {
+  color: var(--text);
+  background: var(--accent-soft);
+  border-color: rgba(110, 168, 254, 0.4);
+}
+
+/* ---- Resources pane ---- */
+.resources {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.resources-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.resources-head h3 {
+  margin: 0;
+  font-size: 15px;
+}
+.resources-head .spacer {
+  flex: 1;
+}
+.resources-body {
+  flex: 1;
+  overflow: auto;
+  padding: 12px 16px;
+}
+.res-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+}
+.res-row:hover {
+  background: var(--bg-elev-2);
+}
+.res-caret {
+  width: 18px;
+  flex: none;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+}
+.res-caret.placeholder {
+  cursor: default;
+}
+.res-name {
+  font-weight: 500;
+}
+.res-kind {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 6px;
+}
+.res-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+.res-row:hover .res-actions {
+  opacity: 1;
+}
+.data-view {
+  margin: 0;
+  max-height: 60vh;
+  overflow: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

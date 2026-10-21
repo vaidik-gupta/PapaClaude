@@ -12,6 +12,7 @@ export default defineConfig({
     proxy: {
       '/conversations': { target: API_TARGET, changeOrigin: true },
       '/manifests': { target: API_TARGET, changeOrigin: true },
+      '/resources': { target: API_TARGET, changeOrigin: true },
     },
   },
 });

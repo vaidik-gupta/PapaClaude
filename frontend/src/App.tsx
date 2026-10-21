@@ -8,6 +8,7 @@ import { Login } from './components/Login';
 import { ManifestLibrary } from './components/ManifestLibrary';
 import { NewProjectDialog } from './components/NewProjectDialog';
 import { PersonaPanel } from './components/PersonaPanel';
+import { ResourcesPane } from './components/ResourcesPane';
 import { useToasts } from './state/toasts';
 
 function tabLabel(c: Conversation): string {
@@ -26,6 +27,7 @@ export function App() {
   const [showNewProject, setShowNewProject] = useState(false);
   const [showAddChild, setShowAddChild] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
+  const [view, setView] = useState<'chat' | 'resources'>('chat');
 
   const loadProjects = useCallback(
     async (selectId?: string) => {
@@ -121,6 +123,20 @@ export function App() {
     <div className="app">
       <div className="topbar">
         <span className="brand">PapaClaude</span>
+        <nav className="nav">
+          <button
+            className={view === 'chat' ? 'navbtn active' : 'navbtn'}
+            onClick={() => setView('chat')}
+          >
+            Chat
+          </button>
+          <button
+            className={view === 'resources' ? 'navbtn active' : 'navbtn'}
+            onClick={() => setView('resources')}
+          >
+            Resources
+          </button>
+        </nav>
         <div className="spacer" />
         <button className="btn small" onClick={() => setShowLibrary(true)}>
           Manifest Library
@@ -138,6 +154,8 @@ export function App() {
       </div>
 
       {/* Top-level tabs: Papas / projects */}
+      {view === 'chat' && (
+      <>
       <div className="tabrow">
         {projects.map((p) => (
           <button
@@ -237,6 +255,10 @@ export function App() {
           </div>
         )}
       </div>
+      </>
+      )}
+
+      {view === 'resources' && <ResourcesPane />}
 
       {showNewProject && (
         <NewProjectDialog

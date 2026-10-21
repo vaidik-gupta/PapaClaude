@@ -39,6 +39,11 @@ class NodeResponse(BaseModel):
     node: dict
 
 
+class DataResponse(BaseModel):
+    path: list[str]
+    data: dict | None
+
+
 def _add(username: str, path: list[str], metadata: dict, data: dict | None) -> NodeResponse:
     try:
         node = resource_manager.add(username, path, metadata=metadata, data=data)
@@ -66,6 +71,28 @@ def add_resource(body: AddBody, user: Annotated[User, Depends(require_user)]) ->
 def reload_tree(user: Annotated[User, Depends(require_user)]) -> dict:
     """Re-read the user's content tree from durable storage into the cache."""
     return resource_manager.reload(user.username).to_dict()
+
+
+@router.get("")
+def get_tree(user: Annotated[User, Depends(require_user)]) -> dict:
+    """Return the user's whole content tree (all engine roots and their subtrees)."""
+    return resource_manager.tree_of(user.username).to_dict()
+
+
+@router.get("/data/{resource_path:path}", response_model=DataResponse)
+def read_data(
+    resource_path: str, user: Annotated[User, Depends(require_user)]
+) -> DataResponse:
+    """Read a single datum's payload from the DB (data leaves only)."""
+    path = [seg for seg in resource_path.split("/") if seg]
+    try:
+        data = resource_manager.get_data(user.username, path)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001 — DB/provider failure
+        logger.exception("infra get_data failed")
+        raise HTTPException(status_code=502, detail=f"infra error: {exc}") from exc
+    return DataResponse(path=path, data=data)
 
 
 @router.get("/{resource_path:path}", response_model=NodeResponse)

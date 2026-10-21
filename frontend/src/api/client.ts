@@ -1,9 +1,13 @@
 import { authHeaders } from './auth';
 import type {
+  ContentTreeDto,
   Conversation,
   ConversationDetail,
   ConvEvent,
+  DataResponse,
   Manifest,
+  NodeResponse,
+  ResourceEngine,
   Role,
 } from './types';
 
@@ -157,6 +161,52 @@ export function updatePersona(
       body: JSON.stringify(patch),
     },
   );
+}
+
+// ---- Resources (content tree) ----
+
+const resourcePath = (path: string[]) =>
+  path.map((seg) => encodeURIComponent(seg)).join('/');
+
+export function getResourceTree(): Promise<ContentTreeDto> {
+  return request<ContentTreeDto>('/resources');
+}
+
+export function reloadResourceTree(): Promise<ContentTreeDto> {
+  return request<ContentTreeDto>('/resources/reload', { method: 'POST' });
+}
+
+export function requestDB(body: {
+  engine: ResourceEngine;
+  name: string;
+  metadata?: Record<string, unknown>;
+}): Promise<NodeResponse> {
+  return request<NodeResponse>('/resources/db', {
+    method: 'POST',
+    body: JSON.stringify({ metadata: {}, ...body }),
+  });
+}
+
+export function addResource(body: {
+  parent_path: string[];
+  name: string;
+  metadata?: Record<string, unknown>;
+  data?: Record<string, unknown> | null;
+}): Promise<NodeResponse> {
+  return request<NodeResponse>('/resources', {
+    method: 'POST',
+    body: JSON.stringify({ metadata: {}, data: null, ...body }),
+  });
+}
+
+export function getResourceData(path: string[]): Promise<DataResponse> {
+  return request<DataResponse>(`/resources/data/${resourcePath(path)}`);
+}
+
+export function deleteResource(path: string[]): Promise<NodeResponse> {
+  return request<NodeResponse>(`/resources/${resourcePath(path)}`, {
+    method: 'DELETE',
+  });
 }
 
 // ---- Turn stream (SSE over POST) ----
