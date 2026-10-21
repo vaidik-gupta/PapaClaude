@@ -209,6 +209,11 @@ class ConversationManager:
             stop_reason=payload.get("stop_reason"),
             num_turns=payload.get("num_turns"),
             total_cost_req=payload.get("total_cost_req"),
+            input_tokens=payload.get("input_tokens"),
+            output_tokens=payload.get("output_tokens"),
+            context_used=payload.get("context_used"),
+            context_window=payload.get("context_window"),
+            model=payload.get("model"),
         )
         # A result flagged is_error (budget/max-turns/API error) is a failed turn.
         status = TurnStatus.ERROR if payload.get("is_error") else TurnStatus.COMPLETE

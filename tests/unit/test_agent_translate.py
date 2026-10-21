@@ -90,6 +90,30 @@ def test_turn_state_assembles_result_payload():
     assert payload["is_error"] is False
 
 
+def test_turn_state_accumulates_token_and_context_metrics():
+    state = _TurnState()
+    state.observe(
+        AssistantUsageData(
+            model="claude", cost=0.006, input_tokens=1000, output_tokens=200,
+            max_prompt_tokens=128000,
+        )
+    )
+    state.observe(
+        AssistantUsageData(
+            model="claude", cost=0.004, input_tokens=1500, output_tokens=300,
+            max_prompt_tokens=128000,
+        )
+    )
+    state.observe(SessionIdleData(aborted=False))
+
+    payload = state.result_payload("s")
+    assert payload["input_tokens"] == 2500  # summed across calls
+    assert payload["output_tokens"] == 500
+    assert payload["context_used"] == 1500  # last call's prompt size
+    assert payload["context_window"] == 128000
+    assert payload["model"] == "claude"
+
+
 def test_turn_state_flags_error_and_abort():
     aborted = _TurnState()
     aborted.observe(SessionIdleData(aborted=True))

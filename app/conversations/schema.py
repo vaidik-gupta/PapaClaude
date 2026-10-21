@@ -34,7 +34,6 @@ def _uuid() -> str:
 
 class ConversationStatus(str, Enum):
     ACTIVE = "active"
-    ARCHIVED = "archived"
 
 
 class TurnStatus(str, Enum):
@@ -87,6 +86,12 @@ class TurnResult(BaseModel):
     stop_reason: str | None = None
     num_turns: int | None = None
     total_cost_req: float | None = None  # Copilot premium-request count, not dollars
+    # Token usage / context metrics (from the SDK's per-call usage events).
+    input_tokens: int | None = None  # prompt tokens processed across the turn
+    output_tokens: int | None = None  # completion tokens produced across the turn
+    context_used: int | None = None  # prompt tokens of the turn's last call (context size)
+    context_window: int | None = None  # max prompt tokens the model allows
+    model: str | None = None
 
 
 class Turn(BaseModel):

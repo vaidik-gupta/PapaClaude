@@ -78,6 +78,11 @@ export interface ResultPayload {
   total_cost_req: number;
   is_error: boolean;
   text: string;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
+  context_used?: number | null;
+  context_window?: number | null;
+  model?: string | null;
 }
 export interface ErrorPayload {
   message: string;

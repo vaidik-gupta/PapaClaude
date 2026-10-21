@@ -28,6 +28,7 @@ export function App() {
   const [showAddChild, setShowAddChild] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
   const [view, setView] = useState<'chat' | 'resources'>('chat');
+  const [streamingConvId, setStreamingConvId] = useState<string | null>(null);
 
   const loadProjects = useCallback(
     async (selectId?: string) => {
@@ -84,6 +85,16 @@ export function App() {
     null;
 
   const creds = getCredentials();
+
+  const statusDot = (id: string) => (
+    <span
+      className={
+        streamingConvId === id ? 'status-dot streaming' : 'status-dot idle'
+      }
+      title={streamingConvId === id ? 'Streaming…' : 'Idle'}
+      aria-hidden
+    />
+  );
 
   const onConversationUpdated = (updated: Conversation) => {
     setProjects((ps) => ps.map((p) => (p.id === updated.id ? updated : p)));
@@ -168,6 +179,14 @@ export function App() {
               setSelectedConvId(p.id);
             }}
           >
+            <span
+              className={
+                p.id === selectedPapaId && streamingConvId
+                  ? 'status-dot streaming'
+                  : 'status-dot idle'
+              }
+              aria-hidden
+            />
             {tabLabel(p)}
             <span
               className="tab-close"
@@ -199,6 +218,7 @@ export function App() {
                 className={p.id === selectedConvId ? 'tab active' : 'tab'}
                 onClick={() => setSelectedConvId(p.id)}
               >
+                {statusDot(p.id)}
                 {tabLabel(p)}
                 <span className="role-badge">papa</span>
               </button>
@@ -209,6 +229,7 @@ export function App() {
               className={c.id === selectedConvId ? 'tab active' : 'tab'}
               onClick={() => setSelectedConvId(c.id)}
             >
+              {statusDot(c.id)}
               {tabLabel(c)}
               <span className="role-badge">child</span>
               <span
@@ -240,6 +261,9 @@ export function App() {
               onSpawnChild={() => {
                 if (selectedPapaId) loadChildren(selectedPapaId);
               }}
+              onStreamingChange={(s) =>
+                setStreamingConvId(s ? selectedConv.id : null)
+              }
             />
             <PersonaPanel
               key={`persona-${selectedConv.id}`}

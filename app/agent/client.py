@@ -154,6 +154,11 @@ class _TurnState:
         self.finish_reason: str | None = None
         self.aborted = False
         self.saw_error = False
+        self.input_tokens = 0
+        self.output_tokens = 0
+        self.context_used: int | None = None
+        self.context_window: int | None = None
+        self.model: str | None = None
 
     def observe(self, data: object) -> None:
         if isinstance(data, AssistantMessageData):
@@ -163,6 +168,15 @@ class _TurnState:
                 self.total_req = (self.total_req or 0.0) + data.cost
             if data.finish_reason is not None:
                 self.finish_reason = data.finish_reason
+            if data.input_tokens is not None:
+                self.input_tokens += data.input_tokens
+                self.context_used = data.input_tokens  # last call's prompt size
+            if data.output_tokens is not None:
+                self.output_tokens += data.output_tokens
+            if data.max_prompt_tokens is not None:
+                self.context_window = data.max_prompt_tokens
+            if data.model is not None:
+                self.model = data.model
         elif isinstance(data, SessionErrorData):
             self.saw_error = True
         elif isinstance(data, SessionIdleData):
@@ -176,6 +190,11 @@ class _TurnState:
             "total_cost_req": self.total_req,
             "is_error": self.saw_error or self.aborted,
             "text": self.text,
+            "input_tokens": self.input_tokens or None,
+            "output_tokens": self.output_tokens or None,
+            "context_used": self.context_used,
+            "context_window": self.context_window,
+            "model": self.model,
         }
 
 
