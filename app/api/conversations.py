@@ -8,7 +8,7 @@ the stream opens so a missing/foreign conversation 404s cleanly.
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -92,6 +92,19 @@ async def get_conversation(
         TurnDetail(turn=t, events=await conversation_manager.get_events(t.id)) for t in turns
     ]
     return ConversationDetail(conversation=conv, turns=details)
+
+
+@router.delete("/{conversation_id}", status_code=204)
+async def delete_conversation(
+    conversation_id: str, user: Annotated[User, Depends(require_user)]
+) -> Response:
+    """Delete a conversation and its turns/events. Deleting a Papa cascades to
+    its children."""
+    try:
+        await conversation_manager.delete_conversation(conversation_id, user.username)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return Response(status_code=204)
 
 
 @router.get("/{conversation_id}/children", response_model=list[Conversation])

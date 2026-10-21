@@ -170,6 +170,28 @@ label {
   color: var(--text-dim);
   margin-left: 6px;
 }
+.tab .tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 8px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-dim);
+  opacity: 0;
+  transition: opacity 0.1s ease, background 0.1s ease, color 0.1s ease;
+}
+.tab:hover .tab-close,
+.tab.active .tab-close {
+  opacity: 1;
+}
+.tab .tab-close:hover {
+  background: var(--danger, #e5534b);
+  color: #fff;
+}
 
 .body {
   flex: 1;

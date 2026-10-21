@@ -45,6 +45,11 @@ class ConversationStore(ABC):
         """Patch top-level conversation fields (e.g. sdk_session_id, status)."""
 
     @abstractmethod
+    async def delete_conversation(self, conversation_id: str) -> None:
+        """Delete a conversation and all of its turns and events. Does not touch
+        child conversations — the manager cascades those explicitly."""
+
+    @abstractmethod
     async def next_turn_index(self, conversation_id: str) -> int:
         """0-based index the next turn should take within the conversation."""
 
@@ -129,6 +134,13 @@ class MongoConversationStore(ConversationStore):
         await self._db[self.CONVERSATIONS].update_one(
             {"id": conversation_id}, {"$set": fields}
         )
+
+    async def delete_conversation(self, conversation_id: str) -> None:
+        """Remove the conversation document along with its turns and events."""
+        await self._db[self.EVENTS].delete_many({"conversation_id": conversation_id})
+        await self._db[self.TURNS].delete_many({"conversation_id": conversation_id})
+        await self._db[self.CONVERSATIONS].delete_one({"id": conversation_id})
+        logger.info("Deleted conversation %s (turns + events)", conversation_id)
 
     async def next_turn_index(self, conversation_id: str) -> int:
         return await self._db[self.TURNS].count_documents(

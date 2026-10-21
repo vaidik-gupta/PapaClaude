@@ -98,6 +98,17 @@ class ConversationManager:
         await self.get_conversation(parent_id, owner)  # ownership + existence
         return await self._store.get_children(parent_id)
 
+    async def delete_conversation(self, conversation_id: str, owner: str) -> None:
+        """Delete a conversation (ownership-checked) with its turns and events.
+
+        Deleting a Papa cascades to all of its children; deleting a child only
+        removes that child."""
+        conv = await self.get_conversation(conversation_id, owner)
+        if conv.role is Role.PARENT:
+            for child in await self._store.get_children(conversation_id):
+                await self._store.delete_conversation(child.id)
+        await self._store.delete_conversation(conversation_id)
+
     async def update_persona(
         self, conversation_id: str, owner: str, patch: dict
     ) -> Conversation:

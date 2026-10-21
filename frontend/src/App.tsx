@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { clearCredentials, getCredentials } from './api/auth';
-import { listChildren, listProjects } from './api/client';
+import { deleteConversation, listChildren, listProjects } from './api/client';
 import type { Conversation } from './api/types';
 import { AddChildDialog } from './components/AddChildDialog';
 import { ChatPane } from './components/ChatPane';
@@ -15,7 +15,7 @@ function tabLabel(c: Conversation): string {
 }
 
 export function App() {
-  const { error } = useToasts();
+  const { error, notify } = useToasts();
   const [authed, setAuthed] = useState(() => getCredentials() != null);
 
   const [projects, setProjects] = useState<Conversation[]>([]);
@@ -88,6 +88,35 @@ export function App() {
     setChildren((cs) => cs.map((c) => (c.id === updated.id ? updated : c)));
   };
 
+  const handleDelete = async (conv: Conversation) => {
+    const isPapa = conv.role === 'parent';
+    const label = tabLabel(conv);
+    const message = isPapa
+      ? `Delete project "${label}" and all of its children? This cannot be undone.`
+      : `Delete child "${label}"? This cannot be undone.`;
+    if (!window.confirm(message)) return;
+    try {
+      await deleteConversation(conv.id);
+      notify(`Deleted ${label}.`);
+      if (isPapa) {
+        const remaining = projects.filter((p) => p.id !== conv.id);
+        setProjects(remaining);
+        if (selectedPapaId === conv.id) {
+          const next = remaining[0]?.id ?? null;
+          setSelectedPapaId(next);
+          setSelectedConvId(next);
+        }
+      } else {
+        setChildren((cs) => cs.filter((c) => c.id !== conv.id));
+        if (selectedConvId === conv.id) {
+          setSelectedConvId(selectedPapaId);
+        }
+      }
+    } catch (e) {
+      error(`Delete failed: ${(e as Error).message}`);
+    }
+  };
+
   return (
     <div className="app">
       <div className="topbar">
@@ -122,6 +151,18 @@ export function App() {
             }}
           >
             {tabLabel(p)}
+            <span
+              className="tab-close"
+              role="button"
+              aria-label={`Delete ${tabLabel(p)}`}
+              title="Delete project"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDelete(p);
+              }}
+            >
+              ×
+            </span>
           </button>
         ))}
         <button className="btn small" onClick={() => setShowNewProject(true)}>
@@ -152,6 +193,18 @@ export function App() {
             >
               {tabLabel(c)}
               <span className="role-badge">child</span>
+              <span
+                className="tab-close"
+                role="button"
+                aria-label={`Delete ${tabLabel(c)}`}
+                title="Delete child"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDelete(c);
+                }}
+              >
+                ×
+              </span>
             </button>
           ))}
           <button className="btn small" onClick={() => setShowAddChild(true)}>

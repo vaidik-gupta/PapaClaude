@@ -108,6 +108,12 @@ export function getConversation(id: string): Promise<ConversationDetail> {
   );
 }
 
+export function deleteConversation(id: string): Promise<void> {
+  return request<void>(`/conversations/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+}
+
 // ---- Children ----
 
 export function listChildren(papaId: string): Promise<Conversation[]> {

@@ -64,6 +64,13 @@ class FakeStore(ConversationStore):
         merged = {**self.conversations[conversation_id].model_dump(mode="json"), **fields}
         self.conversations[conversation_id] = Conversation(**merged)
 
+    async def delete_conversation(self, conversation_id: str) -> None:
+        self.conversations.pop(conversation_id, None)
+        self.turns = {
+            tid: t for tid, t in self.turns.items() if t.conversation_id != conversation_id
+        }
+        self.events = [e for e in self.events if e.conversation_id != conversation_id]
+
     async def next_turn_index(self, conversation_id: str) -> int:
         return sum(1 for t in self.turns.values() if t.conversation_id == conversation_id)
 
@@ -189,3 +196,45 @@ async def test_run_turn_rejects_wrong_owner():
 
     with pytest.raises(ValueError, match="not found"):
         _ = [e async for e in mgr.run_turn(conv.id, "hi", owner="intruder")]
+
+
+async def test_delete_conversation_removes_turns_and_events():
+    store = FakeStore()
+    runner, _ = _fake_runner(
+        [AgentEvent(EventType.RESULT, {"text": "ok", "session_id": "s1"})]
+    )
+    mgr = ConversationManager(store=store, agent_runner=runner, registry=FakeRegistry())
+    conv = await mgr.create_conversation(owner="owner")
+    _ = [e async for e in mgr.run_turn(conv.id, "hi", owner="owner")]
+
+    await mgr.delete_conversation(conv.id, owner="owner")
+
+    assert conv.id not in store.conversations
+    assert all(t.conversation_id != conv.id for t in store.turns.values())
+    assert all(e.conversation_id != conv.id for e in store.events)
+
+
+async def test_delete_papa_cascades_to_children():
+    store = FakeStore()
+    runner, _ = _fake_runner([])
+    mgr = ConversationManager(store=store, agent_runner=runner, registry=FakeRegistry())
+    papa = await mgr.create_conversation(owner="owner")
+    child = await mgr.create_child(
+        parent_id=papa.id, owner="owner", manifest_name="default-child"
+    )
+
+    await mgr.delete_conversation(papa.id, owner="owner")
+
+    assert papa.id not in store.conversations
+    assert child.id not in store.conversations
+
+
+async def test_delete_conversation_rejects_wrong_owner():
+    store = FakeStore()
+    runner, _ = _fake_runner([])
+    mgr = ConversationManager(store=store, agent_runner=runner, registry=FakeRegistry())
+    conv = await mgr.create_conversation(owner="owner")
+
+    with pytest.raises(ValueError, match="not found"):
+        await mgr.delete_conversation(conv.id, owner="intruder")
+    assert conv.id in store.conversations
