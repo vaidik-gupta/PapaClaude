@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { getConversation, streamTurn } from '../api/client';
+import { getConversation, respondWidget, streamTurn } from '../api/client';
 import type {
   Conversation,
   ConversationDetail,
   ConvEvent,
   ResultPayload,
+  WidgetPayload,
 } from '../api/types';
 import { useToasts } from '../state/toasts';
+import { resolveWidget } from '../widgets/registry';
 import { renderEvents, type ChatBlock } from './ChatEvents';
 
 interface ChatPaneProps {
@@ -74,6 +76,8 @@ export function ChatPane({
   // Live events for the in-flight turn.
   const [liveEvents, setLiveEvents] = useState<ConvEvent[]>([]);
   const [livePrompt, setLivePrompt] = useState<string | null>(null);
+  // An in-flight widget blocking the composer until the user responds.
+  const [pendingWidget, setPendingWidget] = useState<WidgetPayload | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const streamRef = useRef<{ cancel: () => void } | null>(null);
@@ -95,6 +99,7 @@ export function ChatPane({
     setBlocks([]);
     setLiveEvents([]);
     setLivePrompt(null);
+    setPendingWidget(null);
     getConversation(convId)
       .then((detail: ConversationDetail) => {
         if (cancelled) return;
@@ -156,6 +161,7 @@ export function ChatPane({
     setPrompt('');
     setLivePrompt(text);
     setLiveEvents([]);
+    setPendingWidget(null);
     setStreaming(true);
 
     collectedRef.current = [];
@@ -168,6 +174,14 @@ export function ChatPane({
       (ev) => {
         collectedRef.current.push(ev);
         setLiveEvents((prev) => [...prev, ev]);
+        // A tool is asking for input: block the composer with its widget.
+        if (ev.type === 'widget') {
+          setPendingWidget(ev.payload);
+        } else if (ev.type === 'widget_response') {
+          setPendingWidget((cur) =>
+            cur && cur.instance_id === ev.payload.instance_id ? null : cur,
+          );
+        }
         // Detect a spawn_child tool_result to refresh children.
         if (
           ev.type === 'tool_result' &&
@@ -208,6 +222,7 @@ export function ChatPane({
     streamRef.current = null;
     setLivePrompt(null);
     setLiveEvents([]);
+    setPendingWidget(null);
     setBlocks((prev) => [
       ...prev,
       { kind: 'user', key: `live-${Date.now()}-p`, text: userText },
@@ -221,6 +236,21 @@ export function ChatPane({
       send();
     }
   };
+
+  // Answer the pending widget: POST the value; the awaiting tool unblocks and
+  // the turn continues on the same SSE stream (which emits widget_response).
+  const answerWidget = (value: Record<string, unknown>) => {
+    const w = pendingWidget;
+    if (!w) return;
+    setPendingWidget(null);
+    respondWidget(convId, w.instance_id, value).catch((e: Error) =>
+      error(`Failed to respond: ${e.message}`),
+    );
+  };
+
+  const WidgetComponent = pendingWidget
+    ? resolveWidget(pendingWidget.widget_id)
+    : undefined;
 
   return (
     <div className="main">
@@ -249,6 +279,20 @@ export function ChatPane({
         )}
       </div>
       <div className="composer-wrap">
+        {pendingWidget && (
+          <div className="widget-overlay">
+            {WidgetComponent ? (
+              <WidgetComponent
+                args={pendingWidget.args}
+                onRespond={answerWidget}
+              />
+            ) : (
+              <div className="widget widget--unknown">
+                Unknown widget “{pendingWidget.widget_id}”. Press Esc to cancel.
+              </div>
+            )}
+          </div>
+        )}
         {metrics && (
           <div className="metrics-bar">
             {metrics.contextWindow != null && metrics.contextUsed != null && (

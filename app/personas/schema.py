@@ -29,6 +29,8 @@ class Manifest(BaseModel):
     allowed_tools: list[str] = Field(default_factory=list)
     max_turns: int | None = None
     permission_mode: str = "auto"  # informational for now
+    # Per-tool permission config: { tool_name: "auto" | "ask" | "deny" }.
+    permissions: dict[str, str] = Field(default_factory=dict)
 
 
 # The snapshot bound onto a conversation is structurally identical to the

@@ -87,6 +87,14 @@ export function PersonaPanel({ conversation, onUpdated }: PersonaPanelProps) {
         <div className="meta-line">
           <b>Role:</b> {p.role}
         </div>
+        <div className="meta-line">
+          <b>Directory:</b>{' '}
+          {conversation.directory ? (
+            <code>{conversation.directory}</code>
+          ) : (
+            <span className="text-dim">not set</span>
+          )}
+        </div>
         {conversation.task && (
           <div className="meta-line">
             <b>Task:</b> {conversation.task}

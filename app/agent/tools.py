@@ -18,8 +18,11 @@ import json
 
 from copilot import Tool, ToolInvocation, ToolResult
 
+from app.agent.permissions import ASK, DENY, permission_for
+from app.agent.widgets import WidgetBridge, WidgetCancelled
 from app.content.manager import ResourceManager, resource_manager
 from app.logging_config import get_logger
+from app.workspace import resolve_directory
 
 logger = get_logger(__name__)
 
@@ -40,6 +43,13 @@ def _err(msg: str) -> ToolResult:
     return ToolResult(text_result_for_llm=msg, result_type="failure", error=msg)
 
 
+def _summarize(tool: str, args: dict) -> str:
+    """A short human-readable description of a gated call, shown in the widget."""
+    if tool == "delete":
+        return f"Delete {args.get('path')} — this removes its whole subtree and is irreversible."
+    return f"Run {tool} with {args}"
+
+
 def build_content_tools(
     owner: str,
     manager: ResourceManager | None = None,
@@ -48,13 +58,52 @@ def build_content_tools(
     """Build the Copilot content tools whose handlers all act as `owner`.
 
     `allowed` restricts the set to the named tools (a persona's allowed_tools);
-    None means all content tools.
+    None means all content tools. Permission gating is applied separately and
+    uniformly by `gate_tools`, so these handlers stay permission-agnostic.
     """
     tools = _content_tools(owner, manager or resource_manager)
     if allowed is not None:
         allow = set(allowed)
         tools = [t for t in tools if t.name in allow]
     return tools
+
+
+def gate_tools(
+    tools: list[Tool],
+    permissions: dict[str, str] | None,
+    bridge: WidgetBridge | None,
+) -> list[Tool]:
+    """Wrap every tool's handler with the agent's permission check.
+
+    One place decides, for *any* tool, whether a call runs (`auto`), is refused
+    (`deny`), or must be confirmed via a permission widget (`ask`). Tools never
+    implement this themselves — adding a new tool gets gating for free. When
+    `bridge` is None (non-turn paths) an `ask` tool proceeds, since there is no
+    stream to surface a widget on.
+    """
+    for tool in tools:
+        tool.handler = _with_permission(tool.name, tool.handler, permissions, bridge)
+    return tools
+
+
+def _with_permission(name: str, inner, permissions, bridge):
+    async def gated(inv: ToolInvocation) -> ToolResult:
+        perm = permission_for(permissions, name)
+        if perm == DENY:
+            return _err(f"'{name}' is not permitted for this agent")
+        if perm == ASK and bridge is not None:
+            try:
+                reply = await bridge.present_widget(
+                    "permission",
+                    {"tool": name, "args": inv.arguments, "summary": _summarize(name, inv.arguments)},
+                )
+            except WidgetCancelled:
+                return _err(f"'{name}' was cancelled before approval")
+            if not reply.get("granted"):
+                return _err(f"user denied '{name}'")
+        return await inner(inv)
+
+    return gated
 
 
 def build_spawn_child_tool(owner: str, parent_id: str) -> Tool:
@@ -73,6 +122,13 @@ def build_spawn_child_tool(owner: str, parent_id: str) -> Tool:
         manifest_name = args["manifest_name"]
         context = args.get("context")
         title = args.get("title")
+        raw_dir = args.get("directory")
+        directory: str | None = None
+        if raw_dir is not None and str(raw_dir).strip():
+            try:
+                directory = resolve_directory(raw_dir)
+            except ValueError as exc:
+                return _err(str(exc))
         try:
             child = await conversation_manager.create_child(
                 parent_id=parent_id,
@@ -80,6 +136,7 @@ def build_spawn_child_tool(owner: str, parent_id: str) -> Tool:
                 manifest_name=manifest_name,
                 title=title,
                 task=context,
+                directory=directory,
             )
         except ValueError as exc:
             return _err(str(exc))
@@ -91,6 +148,7 @@ def build_spawn_child_tool(owner: str, parent_id: str) -> Tool:
                 "child_id": child.id,
                 "title": child.title,
                 "manifest_name": child.manifest_name,
+                "directory": child.directory,
             }
         )
 
@@ -100,7 +158,9 @@ def build_spawn_child_tool(owner: str, parent_id: str) -> Tool:
             "Spawn a focused child agent under this project to carry out a scoped "
             "subtask. `manifest_name` picks a child persona from the library; "
             "`context` is a self-contained instruction string seeded as the child's "
-            "task (the only channel it receives); optional `title` names the child."
+            "task (the only channel it receives); optional `title` names the child; "
+            "optional `directory` sets the child's working directory (must be an "
+            "existing path) and defaults to this project's directory when omitted."
         ),
         parameters={
             "type": "object",
@@ -108,6 +168,7 @@ def build_spawn_child_tool(owner: str, parent_id: str) -> Tool:
                 "manifest_name": {"type": "string"},
                 "context": {"type": "string"},
                 "title": {"type": "string"},
+                "directory": {"type": "string"},
             },
             "required": ["manifest_name", "context"],
         },
@@ -116,12 +177,16 @@ def build_spawn_child_tool(owner: str, parent_id: str) -> Tool:
     )
 
 
-def _content_tools(owner: str, mgr: ResourceManager) -> list[Tool]:
+def _content_tools(
+    owner: str,
+    mgr: ResourceManager,
+) -> list[Tool]:
     """The user-bound tool handlers (a seam that stays testable in isolation).
 
     Each handler takes a Copilot ToolInvocation and reads its `.arguments`; the
-    tools are first-party and pre-approved (`skip_permission=True`), so no
-    permission round-trip is needed for the bound owner's own content.
+    tools are first-party and pre-approved (`skip_permission=True`), so no SDK
+    permission round-trip is needed. Our per-agent permission config (applied by
+    `gate_tools`) gates these handlers independently.
     """
 
     async def inspect_tree(inv: ToolInvocation) -> ToolResult:

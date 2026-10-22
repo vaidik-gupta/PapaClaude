@@ -96,3 +96,120 @@ async def test_owner_is_bound_and_isolated():
     hb = handlers("bob", mgr)
     res = await call(hb["get_data"], {"path": ["s3", "default", "assets", "k1"]})
     assert _is_error(res)
+
+
+# --- Permission gating for mutating tools -------------------------------------
+
+
+class _FakeBridge:
+    """A stand-in WidgetBridge: records presented widgets, returns a canned reply."""
+
+    def __init__(self, reply: dict | None = None, raise_cancelled: bool = False):
+        self.reply = reply or {}
+        self.raise_cancelled = raise_cancelled
+        self.presented: list[tuple[str, dict]] = []
+
+    async def present_widget(self, widget_id: str, args: dict) -> dict:
+        from app.agent.widgets import WidgetCancelled
+
+        self.presented.append((widget_id, args))
+        if self.raise_cancelled:
+            raise WidgetCancelled(widget_id)
+        return self.reply
+
+
+async def _seed_datum(mgr: ResourceManager) -> None:
+    h = handlers("alice", mgr)
+    await call(h["add"], {"parent_path": ["mongodb"], "name": "default"})
+    await call(h["add"], {"parent_path": ["mongodb", "default"], "name": "app"})
+    await call(h["add"], {"parent_path": ["mongodb", "default", "app"], "name": "users"})
+    await call(
+        h["add"],
+        {"parent_path": ["mongodb", "default", "app", "users"], "name": "u1",
+         "data": {"n": 1}},
+    )
+
+
+def _delete_handler(mgr, permissions, bridge):
+    from app.agent.tools import gate_tools
+
+    tools = gate_tools(_content_tools("alice", mgr), permissions, bridge)
+    return next(t.handler for t in tools if t.name == "delete")
+
+
+async def test_delete_denied_by_permission():
+    mgr = make_manager()
+    await _seed_datum(mgr)
+    handler = _delete_handler(mgr, {"delete": "deny"}, None)
+    res = await call(handler, {"path": ["mongodb", "default", "app", "users", "u1"]})
+    assert _is_error(res)
+    # datum still present
+    still = await call(handlers("alice", mgr)["get_data"],
+                       {"path": ["mongodb", "default", "app", "users", "u1"]})
+    assert not _is_error(still)
+
+
+async def test_delete_ask_granted_proceeds():
+    mgr = make_manager()
+    await _seed_datum(mgr)
+    bridge = _FakeBridge(reply={"granted": True})
+    handler = _delete_handler(mgr, {"delete": "ask"}, bridge)
+    res = await call(handler, {"path": ["mongodb", "default", "app", "users", "u1"]})
+    assert not _is_error(res)
+    assert bridge.presented and bridge.presented[0][0] == "permission"
+    gone = await call(handlers("alice", mgr)["get_data"],
+                      {"path": ["mongodb", "default", "app", "users", "u1"]})
+    assert _is_error(gone)
+
+
+async def test_delete_ask_denied_blocks():
+    mgr = make_manager()
+    await _seed_datum(mgr)
+    bridge = _FakeBridge(reply={"granted": False})
+    handler = _delete_handler(mgr, {"delete": "ask"}, bridge)
+    res = await call(handler, {"path": ["mongodb", "default", "app", "users", "u1"]})
+    assert _is_error(res)
+    still = await call(handlers("alice", mgr)["get_data"],
+                       {"path": ["mongodb", "default", "app", "users", "u1"]})
+    assert not _is_error(still)
+
+
+async def test_delete_ask_cancelled_blocks():
+    mgr = make_manager()
+    await _seed_datum(mgr)
+    bridge = _FakeBridge(raise_cancelled=True)
+    handler = _delete_handler(mgr, {"delete": "ask"}, bridge)
+    res = await call(handler, {"path": ["mongodb", "default", "app", "users", "u1"]})
+    assert _is_error(res)
+
+
+async def test_delete_auto_skips_widget():
+    mgr = make_manager()
+    await _seed_datum(mgr)
+    bridge = _FakeBridge(reply={"granted": True})
+    handler = _delete_handler(mgr, {"delete": "auto"}, bridge)
+    res = await call(handler, {"path": ["mongodb", "default", "app", "users", "u1"]})
+    assert not _is_error(res)
+    assert bridge.presented == []  # auto never asks
+
+
+async def test_gate_tools_is_generic_across_tools():
+    # The wrapper gates by tool name, so any tool (not just delete) is covered:
+    # denying `add` blocks it and asking on `get_data` presents a widget.
+    from app.agent.tools import gate_tools
+
+    mgr = make_manager()
+    await _seed_datum(mgr)
+
+    deny_add = gate_tools(_content_tools("alice", mgr), {"add": "deny"}, None)
+    add_handler = next(t.handler for t in deny_add if t.name == "add")
+    res = await call(add_handler, {"parent_path": ["mongodb", "default", "app", "users"],
+                                   "name": "u2", "data": {"n": 2}})
+    assert _is_error(res)
+
+    bridge = _FakeBridge(reply={"granted": True})
+    ask_get = gate_tools(_content_tools("alice", mgr), {"get_data": "ask"}, bridge)
+    get_handler = next(t.handler for t in ask_get if t.name == "get_data")
+    ok = await call(get_handler, {"path": ["mongodb", "default", "app", "users", "u1"]})
+    assert not _is_error(ok)
+    assert bridge.presented and bridge.presented[0][0] == "permission"

@@ -5,6 +5,7 @@ import type {
   ConversationDetail,
   ConvEvent,
   DataResponse,
+  DirListing,
   Manifest,
   NodeResponse,
   ResourceEngine,
@@ -99,6 +100,7 @@ export function listProjects(): Promise<Conversation[]> {
 export function createProject(body: {
   title?: string;
   manifest_name?: string;
+  directory: string;
 }): Promise<Conversation> {
   return request<Conversation>('/conversations', {
     method: 'POST',
@@ -128,7 +130,7 @@ export function listChildren(papaId: string): Promise<Conversation[]> {
 
 export function createChild(
   papaId: string,
-  body: { manifest_name: string; title?: string },
+  body: { manifest_name: string; title?: string; directory?: string },
 ): Promise<Conversation> {
   return request<Conversation>(
     `/conversations/${encodeURIComponent(papaId)}/children`,
@@ -137,6 +139,11 @@ export function createChild(
       body: JSON.stringify(body),
     },
   );
+}
+
+export function listDirs(path?: string): Promise<DirListing> {
+  const qs = path ? `?path=${encodeURIComponent(path)}` : '';
+  return request<DirListing>(`/fs/dirs${qs}`);
 }
 
 // ---- Persona live edit ----
@@ -207,6 +214,21 @@ export function deleteResource(path: string[]): Promise<NodeResponse> {
   return request<NodeResponse>(`/resources/${resourcePath(path)}`, {
     method: 'DELETE',
   });
+}
+
+// ---- Widgets ----
+
+export function respondWidget(
+  convId: string,
+  instanceId: string,
+  value: Record<string, unknown>,
+): Promise<void> {
+  return request<void>(
+    `/conversations/${encodeURIComponent(convId)}/widgets/${encodeURIComponent(
+      instanceId,
+    )}/respond`,
+    { method: 'POST', body: JSON.stringify({ value }) },
+  );
 }
 
 // ---- Turn stream (SSE over POST) ----

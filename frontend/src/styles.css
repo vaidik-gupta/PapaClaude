@@ -686,3 +686,117 @@ label {
     box-shadow: 0 0 0 0 rgba(240, 180, 41, 0);
   }
 }
+
+/* Directory picker (working-directory chooser) */
+.dirpicker {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  overflow: hidden;
+}
+.dirpicker-path {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--accent);
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dirpicker-err {
+  color: var(--danger);
+  font-size: 12px;
+  padding: 6px 10px;
+}
+.dirpicker-list {
+  max-height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.dirpicker-item {
+  text-align: left;
+  background: transparent;
+  color: var(--text);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  padding: 6px 10px;
+  font-size: 13px;
+}
+.dirpicker-item:last-child {
+  border-bottom: none;
+}
+.dirpicker-item:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+.dirpicker-item.up {
+  color: var(--text-muted);
+}
+.dirpicker-empty {
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 8px 10px;
+}
+
+/* ---- Widgets (tool-presented, blocking overlays) ---- */
+.widget-overlay {
+  padding: 10px 12px 0;
+}
+.widget {
+  border: 1px solid var(--border, #333);
+  border-radius: 8px;
+  background: var(--panel, #1b1b1b);
+  padding: 12px 14px;
+}
+.widget--permission {
+  border-color: #7a4a1a;
+}
+.widget__title {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.widget__title code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+.widget__summary {
+  margin: 6px 0;
+  opacity: 0.85;
+  font-size: 13px;
+}
+.widget__args {
+  margin: 6px 0;
+  padding: 8px;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 6px;
+  font-size: 12px;
+  overflow-x: auto;
+}
+.widget__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.widget__hint {
+  margin: 8px 0 0;
+  font-size: 11px;
+  opacity: 0.6;
+}
+.widget--unknown {
+  font-size: 13px;
+  opacity: 0.8;
+}
+
+/* Keyboard selection highlight for widget option buttons. */
+.widget__actions .btn.is-selected {
+  outline: 2px solid var(--accent, #5b8cff);
+  outline-offset: 1px;
+}
+.widget--permission:focus {
+  outline: none;
+}
+.widget--permission:focus-visible {
+  outline: none;
+}

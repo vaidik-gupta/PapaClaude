@@ -53,6 +53,8 @@ class EventType(str, Enum):
     SYSTEM = "system"
     RESULT = "result"
     ERROR = "error"
+    WIDGET = "widget"  # a tool is presenting a widget; await a response
+    WIDGET_RESPONSE = "widget_response"  # the widget was answered or cancelled
 
 
 def _default_persona() -> PersonaSnapshot:
@@ -74,6 +76,7 @@ class Conversation(BaseModel):
     # Persona / project fields.
     role: Role = Role.PARENT
     parent_id: str | None = None  # set on children -> their Papa
+    directory: str | None = None  # agent working directory; children inherit Papa's
     manifest_name: str = "default-parent"  # source manifest
     task: str | None = None  # context string from spawn_child; null via UI button
     persona: PersonaSnapshot = Field(default_factory=_default_persona)

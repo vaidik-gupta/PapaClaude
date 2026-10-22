@@ -46,12 +46,17 @@ class ConversationManager:
         await self._store.ensure_ready()
 
     async def create_conversation(
-        self, owner: str, title: str | None = None, manifest_name: str = "default-parent"
+        self,
+        owner: str,
+        title: str | None = None,
+        manifest_name: str = "default-parent",
+        directory: str | None = None,
     ) -> Conversation:
         """Create a Papa (role=parent) conversation, snapshotting its manifest.
 
-        Raises ValueError if the manifest does not resolve to a role=parent
-        persona (the project endpoint is parent-only).
+        `directory` is the agent's working directory (already validated by the
+        caller). Raises ValueError if the manifest does not resolve to a
+        role=parent persona (the project endpoint is parent-only).
         """
         manifest = self._registry.get(manifest_name)
         if manifest.role is not Role.PARENT:
@@ -60,6 +65,7 @@ class ConversationManager:
             owner=owner,
             title=title,
             role=Role.PARENT,
+            directory=directory,
             manifest_name=manifest_name,
             persona=manifest.model_copy(deep=True),
         )
@@ -72,14 +78,16 @@ class ConversationManager:
         manifest_name: str,
         title: str | None = None,
         task: str | None = None,
+        directory: str | None = None,
     ) -> Conversation:
         """Create a role=child conversation under `parent_id`, snapshotting its
         manifest. `task` is the spawn context (null when added via the UI).
 
-        Raises ValueError if the parent is missing/foreign or the manifest is not
-        a child manifest.
+        `directory` is the child's working directory; when None the child
+        inherits the Papa's directory. Raises ValueError if the parent is
+        missing/foreign or the manifest is not a child manifest.
         """
-        await self.get_conversation(parent_id, owner)  # ownership + existence
+        parent = await self.get_conversation(parent_id, owner)  # ownership + existence
         manifest = self._registry.get(manifest_name)
         if manifest.role is not Role.CHILD:
             raise ValueError(f"manifest {manifest_name!r} is not a child manifest")
@@ -88,6 +96,7 @@ class ConversationManager:
             title=title,
             role=Role.CHILD,
             parent_id=parent_id,
+            directory=directory if directory is not None else parent.directory,
             manifest_name=manifest_name,
             task=task,
             persona=manifest.model_copy(deep=True),
@@ -162,6 +171,8 @@ class ConversationManager:
                 allowed_tools=conv.persona.allowed_tools,
                 role=conv.role.value,
                 conversation_id=conv.id,
+                working_directory=conv.directory,
+                permissions=conv.persona.permissions,
             ):
                 event = await self._persist_event(
                     conversation_id, turn.id, event_index, agent_event

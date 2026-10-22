@@ -58,6 +58,51 @@ async def test_create_child_with_task():
     assert [c.id for c in kids] == [child.id]
 
 
+async def test_create_child_inherits_directory_when_none():
+    mgr = _mgr()
+    papa = await mgr.create_conversation(owner="u", directory="/papa/dir")
+    child = await mgr.create_child(papa.id, owner="u", manifest_name="default-child")
+    assert child.directory == "/papa/dir"
+
+
+async def test_create_child_overrides_directory():
+    mgr = _mgr()
+    papa = await mgr.create_conversation(owner="u", directory="/papa/dir")
+    child = await mgr.create_child(
+        papa.id, owner="u", manifest_name="default-child", directory="/child/dir"
+    )
+    assert child.directory == "/child/dir"
+
+
+async def test_run_turn_passes_working_directory():
+    captured: dict = {}
+
+    async def runner(prompt, *, owner=None, resume_session_id=None, working_directory=None, **kw):
+        captured["working_directory"] = working_directory
+        return
+        yield  # make this an async generator
+
+    mgr = ConversationManager(store=FakeStore(), agent_runner=runner, registry=FakeRegistry())
+    conv = await mgr.create_conversation(owner="u", directory="/work/here")
+    _ = [e async for e in mgr.run_turn(conv.id, "ping", owner="u")]
+    assert captured["working_directory"] == "/work/here"
+
+
+async def test_run_turn_passes_permissions():
+    captured: dict = {}
+
+    async def runner(prompt, *, owner=None, permissions=None, **kw):
+        captured["permissions"] = permissions
+        return
+        yield  # make this an async generator
+
+    mgr = ConversationManager(store=FakeStore(), agent_runner=runner, registry=FakeRegistry())
+    conv = await mgr.create_conversation(owner="u", directory="/work/here")
+    # The snapshot carries whatever the manifest declared (default: empty dict).
+    _ = [e async for e in mgr.run_turn(conv.id, "ping", owner="u")]
+    assert captured["permissions"] == conv.persona.permissions
+
+
 async def test_create_child_rejects_parent_manifest():
     mgr = _mgr()
     papa = await mgr.create_conversation(owner="u")
@@ -121,6 +166,44 @@ async def test_spawn_child_tool_creates_child_and_returns_ids(monkeypatch):
     assert len(kids) == 1
     assert kids[0].id == payload["child_id"]
     assert kids[0].task == "summarize the tree"
+
+
+async def test_spawn_child_tool_directory_inherit_override_and_invalid(monkeypatch, tmp_path):
+    mgr = _mgr()
+    papa = await mgr.create_conversation(owner="u", directory=str(tmp_path))
+
+    import app.conversations.manager as mgr_mod
+
+    monkeypatch.setattr(mgr_mod, "conversation_manager", mgr)
+    tool = build_spawn_child_tool(owner="u", parent_id=papa.id)
+
+    # Omitted directory -> inherits the Papa's.
+    inherited = await tool.handler(
+        ToolInvocation(arguments={"manifest_name": "default-child", "context": "c"})
+    )
+    assert json.loads(inherited.text_result_for_llm)["directory"] == str(tmp_path)
+
+    # Explicit existing directory -> resolved absolute.
+    sub = tmp_path / "sub"
+    sub.mkdir()
+    overridden = await tool.handler(
+        ToolInvocation(
+            arguments={"manifest_name": "default-child", "context": "c", "directory": str(sub)}
+        )
+    )
+    assert json.loads(overridden.text_result_for_llm)["directory"] == str(sub.resolve())
+
+    # Non-existent directory -> failure ToolResult, no child created.
+    bad = await tool.handler(
+        ToolInvocation(
+            arguments={
+                "manifest_name": "default-child",
+                "context": "c",
+                "directory": "/no/such/dir/here",
+            }
+        )
+    )
+    assert bad.result_type == "failure"
 
 
 async def test_list_conversations_defaults_to_role_filter():

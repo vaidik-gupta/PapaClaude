@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { createChild, listManifests } from '../api/client';
 import type { Conversation, Manifest } from '../api/types';
 import { useToasts } from '../state/toasts';
+import { DirectoryPicker } from './DirectoryPicker';
 import { Modal } from './Modal';
 
 interface Props {
@@ -15,6 +16,8 @@ export function AddChildDialog({ papaId, onClose, onCreated }: Props) {
   const [manifests, setManifests] = useState<Manifest[]>([]);
   const [manifestName, setManifestName] = useState('');
   const [title, setTitle] = useState('');
+  const [inherit, setInherit] = useState(true);
+  const [directory, setDirectory] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -29,11 +32,13 @@ export function AddChildDialog({ papaId, onClose, onCreated }: Props) {
 
   const create = async () => {
     if (!manifestName) return;
+    if (!inherit && !directory) return;
     setBusy(true);
     try {
       const conv = await createChild(papaId, {
         manifest_name: manifestName,
         title: title.trim() || undefined,
+        directory: inherit ? undefined : directory ?? undefined,
       });
       onCreated(conv);
     } catch (e) {
@@ -55,7 +60,7 @@ export function AddChildDialog({ papaId, onClose, onCreated }: Props) {
           <button
             className="btn primary"
             onClick={create}
-            disabled={busy || !manifestName}
+            disabled={busy || !manifestName || (!inherit && !directory)}
           >
             {busy ? 'Creating…' : 'Create'}
           </button>
@@ -83,6 +88,19 @@ export function AddChildDialog({ papaId, onClose, onCreated }: Props) {
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Child task"
         />
+      </div>
+      <div className="field">
+        <label className="checkbox-row">
+          <input
+            type="checkbox"
+            checked={inherit}
+            onChange={(e) => setInherit(e.target.checked)}
+          />
+          Inherit parent's working directory
+        </label>
+        {!inherit && (
+          <DirectoryPicker value={directory} onChange={setDirectory} />
+        )}
       </div>
       <div className="hint">A UI-created child starts with no context.</div>
     </Modal>

@@ -12,6 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.conversations import router as conversations_router
+from app.api.fs import router as fs_router
 from app.api.personas import router as personas_router
 from app.api.resources import router as resources_router
 from app.api.routes import router
@@ -48,6 +49,7 @@ app.include_router(router)
 app.include_router(resources_router)
 app.include_router(conversations_router)
 app.include_router(personas_router)
+app.include_router(fs_router)
 
 
 def main() -> None:

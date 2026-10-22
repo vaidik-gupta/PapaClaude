@@ -13,6 +13,7 @@ export default defineConfig({
       '/conversations': { target: API_TARGET, changeOrigin: true },
       '/manifests': { target: API_TARGET, changeOrigin: true },
       '/resources': { target: API_TARGET, changeOrigin: true },
+      '/fs': { target: API_TARGET, changeOrigin: true },
     },
   },
 });

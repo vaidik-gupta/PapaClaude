@@ -41,9 +41,17 @@ export interface Conversation {
   updated_at: string;
   role: Role;
   parent_id: string | null;
+  directory: string | null;
   manifest_name: string;
   task: string | null;
   persona: PersonaSnapshot;
+}
+
+export interface DirListing {
+  path: string;
+  parent: string | null;
+  home: string;
+  entries: string[];
 }
 
 export type EventType =
@@ -53,7 +61,9 @@ export type EventType =
   | 'tool_result'
   | 'system'
   | 'result'
-  | 'error';
+  | 'error'
+  | 'widget'
+  | 'widget_response';
 
 export interface AssistantTextPayload {
   text: string;
@@ -87,6 +97,16 @@ export interface ResultPayload {
 export interface ErrorPayload {
   message: string;
 }
+export interface WidgetPayload {
+  instance_id: string;
+  widget_id: string;
+  args: Record<string, unknown>;
+}
+export interface WidgetResponsePayload {
+  instance_id: string;
+  status: 'answered' | 'cancelled';
+  value?: Record<string, unknown>;
+}
 
 // Generic event envelope from the contract.
 export interface EventBase {
@@ -106,7 +126,9 @@ export type ConvEvent =
   | (EventBase & { type: 'tool_result'; payload: ToolResultPayload })
   | (EventBase & { type: 'system'; payload: Record<string, unknown> })
   | (EventBase & { type: 'result'; payload: ResultPayload })
-  | (EventBase & { type: 'error'; payload: ErrorPayload });
+  | (EventBase & { type: 'error'; payload: ErrorPayload })
+  | (EventBase & { type: 'widget'; payload: WidgetPayload })
+  | (EventBase & { type: 'widget_response'; payload: WidgetResponsePayload });
 
 export interface Turn {
   turn: {

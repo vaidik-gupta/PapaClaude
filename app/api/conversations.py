@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from app.agent.widgets import pending_widgets
 from app.auth.dependencies import require_user
 from app.auth.service import User
 from app.conversations.manager import conversation_manager
@@ -19,6 +20,7 @@ from app.conversations.schema import Conversation, Event, Turn
 from app.logging_config import get_logger
 from app.personas.registry import RegistryError
 from app.personas.schema import Role
+from app.workspace import resolve_directory
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
 logger = get_logger(__name__)
@@ -27,11 +29,13 @@ logger = get_logger(__name__)
 class CreateConversationBody(BaseModel):
     title: str | None = None
     manifest_name: str = "default-parent"
+    directory: str  # agent working directory (required; must exist)
 
 
 class CreateChildBody(BaseModel):
     manifest_name: str
     title: str | None = None
+    directory: str | None = None  # optional; inherits the Papa's when omitted
 
 
 class PersonaPatch(BaseModel):
@@ -45,6 +49,10 @@ class PersonaPatch(BaseModel):
 
 class TurnBody(BaseModel):
     prompt: str
+
+
+class WidgetRespondBody(BaseModel):
+    value: dict
 
 
 class TurnDetail(BaseModel):
@@ -62,8 +70,9 @@ async def create_conversation(
     body: CreateConversationBody, user: Annotated[User, Depends(require_user)]
 ) -> Conversation:
     try:
+        directory = resolve_directory(body.directory)
         return await conversation_manager.create_conversation(
-            user.username, body.title, body.manifest_name
+            user.username, body.title, body.manifest_name, directory
         )
     except RegistryError as exc:
         raise HTTPException(status_code=exc.status, detail=exc.message) from exc
@@ -124,16 +133,20 @@ async def create_child(
     user: Annotated[User, Depends(require_user)],
 ) -> Conversation:
     try:
+        directory = (
+            resolve_directory(body.directory) if body.directory is not None else None
+        )
         return await conversation_manager.create_child(
             parent_id=conversation_id,
             owner=user.username,
             manifest_name=body.manifest_name,
             title=body.title,
+            directory=directory,
         )
     except RegistryError as exc:
         raise HTTPException(status_code=exc.status, detail=exc.message) from exc
     except ValueError as exc:
-        # Foreign/missing parent -> 404; wrong-role manifest -> 400.
+        # Foreign/missing parent -> 404; wrong-role manifest / bad dir -> 400.
         status = 404 if "not found" in str(exc) else 400
         raise HTTPException(status_code=status, detail=str(exc)) from exc
 
@@ -176,3 +189,25 @@ async def create_turn(
             yield _sse(event)
 
     return StreamingResponse(stream(), media_type="text/event-stream")
+
+
+@router.post("/{conversation_id}/widgets/{instance_id}/respond", status_code=204)
+async def respond_widget(
+    conversation_id: str,
+    instance_id: str,
+    body: WidgetRespondBody,
+    user: Annotated[User, Depends(require_user)],
+) -> Response:
+    """Resolve an in-flight widget for this conversation with the user's reply.
+
+    The widget's awaiting tool (on a still-open turn stream) unblocks and
+    continues. 404 if the conversation is unknown/foreign or there is no
+    matching pending widget."""
+    try:
+        await conversation_manager.get_conversation(conversation_id, user.username)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    if not pending_widgets.resolve(instance_id, conversation_id, body.value):
+        raise HTTPException(status_code=404, detail="no pending widget")
+    return Response(status_code=204)

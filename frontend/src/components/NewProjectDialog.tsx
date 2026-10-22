@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { createProject, listManifests } from '../api/client';
 import type { Conversation, Manifest } from '../api/types';
 import { useToasts } from '../state/toasts';
+import { DirectoryPicker } from './DirectoryPicker';
 import { Modal } from './Modal';
 
 interface Props {
@@ -14,6 +15,7 @@ export function NewProjectDialog({ onClose, onCreated }: Props) {
   const [manifests, setManifests] = useState<Manifest[]>([]);
   const [manifestName, setManifestName] = useState('');
   const [title, setTitle] = useState('');
+  const [directory, setDirectory] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -27,11 +29,13 @@ export function NewProjectDialog({ onClose, onCreated }: Props) {
   }, [error]);
 
   const create = async () => {
+    if (!directory) return;
     setBusy(true);
     try {
       const conv = await createProject({
         manifest_name: manifestName || undefined,
         title: title.trim() || undefined,
+        directory,
       });
       onCreated(conv);
     } catch (e) {
@@ -53,7 +57,7 @@ export function NewProjectDialog({ onClose, onCreated }: Props) {
           <button
             className="btn primary"
             onClick={create}
-            disabled={busy || !manifestName}
+            disabled={busy || !manifestName || !directory}
           >
             {busy ? 'Creating…' : 'Create'}
           </button>
@@ -81,6 +85,10 @@ export function NewProjectDialog({ onClose, onCreated }: Props) {
           onChange={(e) => setTitle(e.target.value)}
           placeholder="My project"
         />
+      </div>
+      <div className="field">
+        <label>Working directory</label>
+        <DirectoryPicker value={directory} onChange={setDirectory} />
       </div>
     </Modal>
   );

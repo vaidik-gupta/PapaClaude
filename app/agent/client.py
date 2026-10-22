@@ -35,7 +35,8 @@ from copilot.session_events import (
     AssistantUsageData as _UsageData,
 )
 
-from app.agent.tools import build_content_tools, build_spawn_child_tool
+from app.agent.tools import build_content_tools, build_spawn_child_tool, gate_tools
+from app.agent.widgets import WidgetBridge
 from app.config import settings
 from app.conversations.schema import EventType
 from app.logging_config import get_logger
@@ -206,13 +207,17 @@ def _build_tools(
     allowed_tools: list[str] | None,
     role: str | None,
     conversation_id: str | None,
+    permissions: dict[str, str] | None = None,
+    bridge: WidgetBridge | None = None,
 ) -> list:
     """Assemble the session's tools: the persona's allowed content tools, plus
-    the parent-only `spawn_child` tool for a parent conversation."""
+    the parent-only `spawn_child` tool for a parent conversation. Every tool is
+    then wrapped once by `gate_tools`, so permission handling is uniform and new
+    tools are gated automatically."""
     tools = build_content_tools(owner, allowed=allowed_tools)
     if role == "parent" and conversation_id is not None:
         tools.append(build_spawn_child_tool(owner, conversation_id))
-    return tools
+    return gate_tools(tools, permissions, bridge)
 
 
 async def _open_session(
@@ -222,11 +227,13 @@ async def _open_session(
     new_session_id: str,
     system_prompt: str | None,
     tools: list,
+    working_directory: str | None = None,
 ) -> CopilotSession:
     """Create a fresh session (bound to a session id we own) or resume one.
 
     The agent is sandboxed to a per-user content tool surface: only our
     user-bound tools, pre-approved so no permission prompt is raised.
+    `working_directory` attaches the agent to a filesystem directory.
     """
     kwargs = {
         "model": settings.copilot_model or None,
@@ -234,6 +241,8 @@ async def _open_session(
         "system_message": _system_message(system_prompt),
         "on_permission_request": PermissionHandler.approve_all,
     }
+    if working_directory:
+        kwargs["working_directory"] = working_directory
     if resume_session_id:
         return await client.resume_session(resume_session_id, **kwargs)
     return await client.create_session(session_id=new_session_id, **kwargs)
@@ -255,6 +264,8 @@ async def run_turn(
     allowed_tools: list[str] | None = None,
     role: str | None = None,
     conversation_id: str | None = None,
+    working_directory: str | None = None,
+    permissions: dict[str, str] | None = None,
 ) -> AsyncIterator[AgentEvent]:
     """Run one turn, resuming the given session, and stream translated events.
 
@@ -267,6 +278,10 @@ async def run_turn(
     session_id = resume_session_id or uuid4().hex
     queue: asyncio.Queue[AgentEvent | _Failure | None] = asyncio.Queue()
     state = _TurnState()
+    bridge = WidgetBridge(
+        emit=lambda etype, payload: queue.put_nowait(AgentEvent(etype, payload)),
+        conversation_id=conversation_id or session_id,
+    )
 
     def on_event(event) -> None:
         data = event.data
@@ -276,9 +291,9 @@ async def run_turn(
         if isinstance(data, SessionIdleData):
             queue.put_nowait(AgentEvent(EventType.RESULT, state.result_payload(session_id)))
 
-    tools = _build_tools(owner, allowed_tools, role, conversation_id)
+    tools = _build_tools(owner, allowed_tools, role, conversation_id, permissions, bridge)
     session = await _open_session(
-        client, owner, resume_session_id, session_id, system_prompt, tools
+        client, owner, resume_session_id, session_id, system_prompt, tools, working_directory
     )
     logger.debug("Running turn for %s (resume=%s)", owner, resume_session_id)
 
@@ -299,6 +314,9 @@ async def run_turn(
                     raise item.exc
                 yield item
         finally:
+            # Unblock any tool still awaiting a widget before we join the
+            # driver, otherwise send_and_wait could deadlock on a pending future.
+            bridge.cancel_all()
             await drive_task
 
 
