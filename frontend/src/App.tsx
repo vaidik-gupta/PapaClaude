@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import type { Dispatch, SetStateAction } from 'react';
 import { clearCredentials, getCredentials } from './api/auth';
 import { deleteConversation, listChildren, listProjects } from './api/client';
 import type { Conversation } from './api/types';
@@ -28,7 +29,15 @@ export function App() {
   const [showAddChild, setShowAddChild] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
   const [view, setView] = useState<'chat' | 'resources'>('chat');
-  const [streamingConvId, setStreamingConvId] = useState<string | null>(null);
+  // Per-conversation tab status. Keyed by conversation id so a backgrounded
+  // (hidden-but-mounted) pane still reports its streaming / needs-you state.
+  const [streamingConvs, setStreamingConvs] = useState<Record<string, boolean>>(
+    {},
+  );
+  const [widgetConvs, setWidgetConvs] = useState<Record<string, boolean>>({});
+  // Conversations that have been opened at least once stay mounted (hidden when
+  // not selected) so switching tabs never aborts an in-flight turn/widget.
+  const [mountedIds, setMountedIds] = useState<string[]>([]);
 
   const loadProjects = useCallback(
     async (selectId?: string) => {
@@ -71,6 +80,15 @@ export function App() {
     else setChildren([]);
   }, [selectedPapaId, loadChildren]);
 
+  // Remember every conversation the user opens so its pane stays mounted.
+  useEffect(() => {
+    if (selectedConvId) {
+      setMountedIds((ids) =>
+        ids.includes(selectedConvId) ? ids : [...ids, selectedConvId],
+      );
+    }
+  }, [selectedConvId]);
+
   if (!authed) {
     return <Login onLoggedIn={() => setAuthed(true)} />;
   }
@@ -84,17 +102,38 @@ export function App() {
     projects.find((p) => p.id === selectedConvId) ??
     null;
 
+  // Resolve the conversations to keep mounted (opened at least once and still
+  // reachable), always including the current selection so there is no flash.
+  const convById = new Map<string, Conversation>();
+  for (const c of [...projects, ...children]) convById.set(c.id, c);
+  const mountIds = new Set(mountedIds);
+  if (selectedConvId) mountIds.add(selectedConvId);
+  const mountedConvs = [...mountIds]
+    .map((id) => convById.get(id))
+    .filter((c): c is Conversation => Boolean(c));
+
   const creds = getCredentials();
 
-  const statusDot = (id: string) => (
-    <span
-      className={
-        streamingConvId === id ? 'status-dot streaming' : 'status-dot idle'
-      }
-      title={streamingConvId === id ? 'Streaming…' : 'Idle'}
-      aria-hidden
-    />
-  );
+  const setConvFlag =
+    (setter: Dispatch<SetStateAction<Record<string, boolean>>>) =>
+    (id: string, on: boolean) =>
+      setter((m) => (m[id] === on ? m : { ...m, [id]: on }));
+  const setStreaming = setConvFlag(setStreamingConvs);
+  const setWidget = setConvFlag(setWidgetConvs);
+
+  const statusDot = (id: string) => {
+    const cls = widgetConvs[id]
+      ? 'status-dot needs-you'
+      : streamingConvs[id]
+        ? 'status-dot streaming'
+        : 'status-dot idle';
+    const title = widgetConvs[id]
+      ? 'Needs you'
+      : streamingConvs[id]
+        ? 'Streaming…'
+        : 'Idle';
+    return <span className={cls} title={title} aria-hidden />;
+  };
 
   const onConversationUpdated = (updated: Conversation) => {
     setProjects((ps) => ps.map((p) => (p.id === updated.id ? updated : p)));
@@ -179,14 +218,7 @@ export function App() {
               setSelectedConvId(p.id);
             }}
           >
-            <span
-              className={
-                p.id === selectedPapaId && streamingConvId
-                  ? 'status-dot streaming'
-                  : 'status-dot idle'
-              }
-              aria-hidden
-            />
+            {statusDot(p.id)}
             {tabLabel(p)}
             <span
               className="tab-close"
@@ -253,24 +285,24 @@ export function App() {
       )}
 
       <div className="body">
+        {mountedConvs.map((c) => (
+          <ChatPane
+            key={c.id}
+            hidden={c.id !== selectedConvId}
+            conversation={c}
+            onSpawnChild={() => {
+              if (selectedPapaId) loadChildren(selectedPapaId);
+            }}
+            onStreamingChange={(s) => setStreaming(c.id, s)}
+            onWidgetPendingChange={(p) => setWidget(c.id, p)}
+          />
+        ))}
         {selectedConv ? (
-          <>
-            <ChatPane
-              key={selectedConv.id}
-              conversation={selectedConv}
-              onSpawnChild={() => {
-                if (selectedPapaId) loadChildren(selectedPapaId);
-              }}
-              onStreamingChange={(s) =>
-                setStreamingConvId(s ? selectedConv.id : null)
-              }
-            />
-            <PersonaPanel
-              key={`persona-${selectedConv.id}`}
-              conversation={selectedConv}
-              onUpdated={onConversationUpdated}
-            />
-          </>
+          <PersonaPanel
+            key={`persona-${selectedConv.id}`}
+            conversation={selectedConv}
+            onUpdated={onConversationUpdated}
+          />
         ) : (
           <div className="empty">
             {projects.length === 0

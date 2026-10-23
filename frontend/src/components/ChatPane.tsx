@@ -18,6 +18,11 @@ interface ChatPaneProps {
   onSpawnChild: () => void;
   // Reports whether this pane is currently streaming a turn (for tab status).
   onStreamingChange?: (streaming: boolean) => void;
+  // Reports whether a widget is awaiting the user's response (for tab status).
+  onWidgetPendingChange?: (pending: boolean) => void;
+  // When true, the pane stays mounted (keeping its turn/stream alive) but is
+  // visually hidden — used so switching tabs does not abort an in-flight turn.
+  hidden?: boolean;
 }
 
 interface ChatMetrics {
@@ -65,6 +70,8 @@ export function ChatPane({
   conversation,
   onSpawnChild,
   onStreamingChange,
+  onWidgetPendingChange,
+  hidden = false,
 }: ChatPaneProps) {
   const { error } = useToasts();
   const convId = conversation.id;
@@ -141,9 +148,20 @@ export function ChatPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Esc cancels the in-flight turn from anywhere while streaming.
+  // Report "needs you" state up (a pending widget) and clear it on unmount.
   useEffect(() => {
-    if (!streaming) return;
+    onWidgetPendingChange?.(pendingWidget !== null);
+  }, [pendingWidget, onWidgetPendingChange]);
+  useEffect(() => {
+    return () => onWidgetPendingChange?.(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Esc cancels the in-flight turn from anywhere while streaming. Only the
+  // visible pane listens, so a hidden (backgrounded) streaming pane isn't
+  // stopped by an Esc meant for the pane the user is looking at.
+  useEffect(() => {
+    if (!streaming || hidden) return;
     const onEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
@@ -153,7 +171,7 @@ export function ChatPane({
     window.addEventListener('keydown', onEsc);
     return () => window.removeEventListener('keydown', onEsc);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [streaming]);
+  }, [streaming, hidden]);
 
   const send = () => {
     const text = prompt.trim();
@@ -253,7 +271,7 @@ export function ChatPane({
     : undefined;
 
   return (
-    <div className="main">
+    <div className="main" style={hidden ? { display: 'none' } : undefined}>
       <div className="chat" ref={scrollRef}>
         {loading && <div className="empty">Loading…</div>}
         {!loading && blocks.length === 0 && !livePrompt && (

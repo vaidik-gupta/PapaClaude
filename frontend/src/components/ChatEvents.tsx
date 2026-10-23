@@ -3,7 +3,9 @@ import type {
   ResultPayload,
   ToolResultPayload,
   ToolUsePayload,
+  WidgetResponsePayload,
 } from '../api/types';
+import { WidgetSummary } from '../widgets/WidgetSummary';
 
 // A user prompt rendered as its own bubble (turns carry the prompt).
 export interface UserBubble {
@@ -74,9 +76,12 @@ function ResultFooter({ payload }: { payload: ResultPayload }) {
 // matching tool_use card (match on tool_use_id === tool_use.id).
 export function renderEvents(events: ConvEvent[]) {
   const resultsByUseId = new Map<string, ToolResultPayload>();
+  const responsesByInstanceId = new Map<string, WidgetResponsePayload>();
   for (const ev of events) {
     if (ev.type === 'tool_result') {
       resultsByUseId.set(ev.payload.tool_use_id, ev.payload);
+    } else if (ev.type === 'widget_response') {
+      responsesByInstanceId.set(ev.payload.instance_id, ev.payload);
     }
   }
 
@@ -110,6 +115,22 @@ export function renderEvents(events: ConvEvent[]) {
         break;
       case 'tool_result':
         // Rendered inside its matching tool_use card; skip standalone.
+        break;
+      case 'widget':
+        // A resolved widget replayed from history: read-only summary paired
+        // with its recorded response (generic card unless the widget defines
+        // its own summary component).
+        nodes.push(
+          <WidgetSummary
+            key={ev.id}
+            widgetId={ev.payload.widget_id}
+            args={ev.payload.args}
+            response={responsesByInstanceId.get(ev.payload.instance_id) ?? null}
+          />,
+        );
+        break;
+      case 'widget_response':
+        // Rendered inside its matching widget summary; skip standalone.
         break;
       case 'system':
         break;

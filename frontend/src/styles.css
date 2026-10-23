@@ -675,6 +675,22 @@ label {
   box-shadow: 0 0 0 0 rgba(240, 180, 41, 0.6);
   animation: pulse 1.2s ease-out infinite;
 }
+.status-dot.needs-you {
+  background: #f5731f;
+  box-shadow: 0 0 0 0 rgba(245, 115, 31, 0.7);
+  animation: pulse-needs 1s ease-out infinite;
+}
+@keyframes pulse-needs {
+  0% {
+    box-shadow: 0 0 0 0 rgba(245, 115, 31, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(245, 115, 31, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(245, 115, 31, 0);
+  }
+}
 @keyframes pulse {
   0% {
     box-shadow: 0 0 0 0 rgba(240, 180, 41, 0.6);
@@ -800,3 +816,40 @@ label {
 .widget--permission:focus-visible {
   outline: none;
 }
+
+/* Read-only summary card for a resolved widget replayed in the transcript. */
+.widget-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  margin: 4px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  font-size: 12px;
+}
+.widget-summary__tag {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 10px;
+  opacity: 0.6;
+}
+.widget-summary__tool {
+  font-family: var(--mono, monospace);
+  opacity: 0.85;
+}
+.widget-summary__outcome {
+  font-weight: 600;
+}
+.widget-summary__outcome.ok {
+  color: #2f9e44;
+}
+.widget-summary__outcome.deny {
+  color: #e03131;
+}
+.widget-summary__outcome.muted {
+  color: var(--text-dim);
+  opacity: 0.8;
+}
+

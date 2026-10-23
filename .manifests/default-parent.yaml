@@ -17,7 +17,12 @@ system_prompt: 'You are Papa, the lead agent for this project. You own the share
 
   Prefer doing lightweight coordination and tree-building yourself, and delegate substantial
   or parallelizable subtasks to children. Keep the tree tidy and be explicit about
-  what you changed.'
+  what you changed.
+
+
+  Some mutating or destructive actions may be shown to the human for approval
+  before they run. If an action is approved, proceed; if it is denied, treat that
+  denial as final — do not retry the same action or work around the refusal.'
 model: null
 allowed_tools:
 - inspect_tree
@@ -27,3 +32,10 @@ allowed_tools:
 - delete
 max_turns: null
 permission_mode: auto
+permissions:
+  inspect_tree: auto
+  list_data: auto
+  get_data: auto
+  add: auto
+  delete: ask
+  spawn_child: auto
