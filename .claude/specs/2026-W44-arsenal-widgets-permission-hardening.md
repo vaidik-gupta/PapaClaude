@@ -135,13 +135,16 @@ are captured here but may slip.
    - Default ~120s; make it a constant. Frontend shows a countdown or a muted
      "expires soon" hint (nice-to-have).
 
-3. **Tab-switch / reload resilience.** `ChatPane` is keyed on conversation id, so
-   switching tabs mid-widget unmounts it → aborts the SSE fetch → backend
-   `cancel_all` ends the turn; a reload loses the in-flight turn entirely.
-   - Minimum: **warn** before switching away from a streaming tab, or keep the
-     stream alive when a pane is backgrounded.
-   - Full fix (later): server-side **turn replay** — persist in-flight turn
-     events and a pending-widget marker so a reconnecting client can resume.
+3. **Tab-switch / reload resilience.** ~~`ChatPane` is keyed on conversation id, so
+   switching tabs mid-widget unmounts it → aborts the SSE fetch.~~
+   - ✅ **Tab-switch: DONE in W43** — opened panes now stay mounted (hidden when
+     not selected), so switching tabs no longer aborts an in-flight turn/widget;
+     the Esc listener is scoped to the visible pane and tab status is tracked
+     per-conversation. Also ✅ **resolved-widget replay** shipped (read-only
+     summary cards in the transcript).
+   - ❌ **Reload: explicitly descoped** — in-flight turns/widgets are *not*
+     expected to survive a full page reload (product decision). The server-side
+     turn-replay / detach-from-request work is **not** planned.
 
 4. **Single-process assumption (document).** `pending_widgets` is an in-memory
    global; `respond` works only because uvicorn runs one event loop. Multiple

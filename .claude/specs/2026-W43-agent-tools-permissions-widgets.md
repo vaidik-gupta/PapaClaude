@@ -1,5 +1,13 @@
 # Weekly Spec — 2026-W43 · Tools, Permissions & Widgets
 
+> **Status: ✅ COMPLETE (2026-10-23).** All three primitives shipped and are in
+> use. The widget mechanism, per-agent permission config, central `gate_tools`
+> wrapper, the `permission` widget (keyboard-operable), per-conversation tab
+> status (incl. the amber "needs-you" dot), tab-switch resilience, and
+> read-only replay of resolved widgets are all live. A few breadth/hardening
+> items were deliberately rolled into
+> `2026-W44-arsenal-widgets-permission-hardening.md` (see **Carried to W44**).
+
 **Week of:** 2026-10-21
 **Theme:** Give the agent a real tooling layer. Three primitives — **tools** the
 model sees, a per-agent **permission config** built from the manifest, and
@@ -235,24 +243,46 @@ cancel, so an older frontend never deadlocks a turn.
 
 ## Deliverables / checklist
 
-- [ ] `WidgetBridge` (per-turn) + `PendingWidgets` (global) + `present_widget()`.
-- [ ] `EventType.WIDGET` + `WIDGET_RESPONSE` payloads (`schema.py`, `types.ts`).
-- [ ] `POST /conversations/{id}/widgets/{instance_id}/respond` endpoint.
-- [ ] Thread the bridge into `_build_tools` (contextvar or closure).
-- [ ] Per-agent permission config from manifest — a `{ tool: auto|ask|deny }`
-      dict — + lookup with a default.
-- [ ] `ask_user` tool (Pattern 2).
-- [ ] Gate `add`/`delete` via the config + permission/diff widget (Pattern 1);
-      retire `approve_all` for gated tools.
-- [ ] System-prompt line: mutating/destructive actions may be shown for approval;
-      a denial is final.
-- [ ] Frontend widget registry + `choice`/`permission`/`diff` components + unknown
-      fallback.
-- [ ] `ChatPane` gating, `respondWidget` client fn, amber "needs-you" tab dot.
-- [ ] Cancel wiring: Stop/Esc cancels pending widgets → tool aborts cleanly.
-- [ ] Tests: `present_widget` resolve + cancel, `ask_user` round-trip, a gated
-      `delete` denied vs. approved, reload replay of a resolved widget;
-      `pytest` + `ruff` + `tsc` + `vite build`.
+- [x] `WidgetBridge` (per-turn) + `PendingWidgets` (global) + `present_widget()`.
+- [x] `EventType.WIDGET` + `WIDGET_RESPONSE` payloads (`schema.py`, `types.ts`).
+- [x] `POST /conversations/{id}/widgets/{instance_id}/respond` endpoint.
+- [x] Thread the bridge into `_build_tools` (per-turn closure).
+- [x] Per-agent permission config from manifest — a `{ tool: auto|ask|deny }`
+      dict — + lookup with a default (`DEFAULT_PERMISSIONS` / `permission_for`).
+- [ ] `ask_user` tool (Pattern 2). → **moved to W44** (choice/question widgets).
+- [x] Gate `add`/`delete` via the config + permission widget (Pattern 1), via a
+      central `gate_tools` wrapper (generic across tools). *Partial:* the **diff**
+      widget and retiring the session-level `approve_all` → **moved to W44**.
+- [x] System-prompt line: mutating/destructive actions may be shown for approval;
+      a denial is final (added to both default manifests).
+- [x] Frontend widget registry + `permission` component + unknown fallback.
+      *Partial:* `choice`/`diff` components → **moved to W44**.
+- [x] `ChatPane` gating, `respondWidget` client fn, amber "needs-you" tab dot
+      (per-conversation status).
+- [x] Cancel wiring: Stop/Esc cancels pending widgets → tool aborts cleanly.
+- [x] Tests: `present_widget` resolve + cancel, a gated `delete` denied vs.
+      approved; `pytest` + `tsc` + `vite build` green. (`ask_user` round-trip
+      deferred with the tool → W44.)
+
+**Also delivered (beyond the original list):**
+
+- [x] **Tab-switch resilience:** opened panes stay mounted (hidden) so switching
+      tabs no longer aborts an in-flight turn/widget. (In-flight survival across
+      a **reload** was explicitly descoped — not supported.)
+- [x] **Read-only replay of resolved widgets** in the transcript, via a registry
+      that is now `{ component, summary? }` — a generic summary card by default,
+      with an opt-in custom read-only view per widget.
+
+### Carried to W44
+
+Tracked in `2026-W44-arsenal-widgets-permission-hardening.md`:
+
+- `ask_user` + `choice`/`question` widgets, and the `diff` widget (items 6–8).
+- Retiring the session-level `approve_all` and bridging the SDK's native
+  `on_permission_request` to widgets (W44 item 0, after the SDK built-in-tools
+  discovery).
+- Remember-grants, widget timeout, serialized parallel widgets, permission UI,
+  the fs/bash/edit arsenal, and manifest tuning.
 
 ---
 
