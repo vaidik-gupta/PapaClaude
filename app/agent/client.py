@@ -36,7 +36,12 @@ from copilot.session_events import (
 )
 
 from app.agent.native_permissions import build_permission_handler
-from app.agent.tools import build_content_tools, build_spawn_child_tool, gate_tools
+from app.agent.user_input import build_user_input_handler
+from app.agent.tools import (
+    build_content_tools,
+    build_spawn_child_tool,
+    gate_tools,
+)
 from app.agent.widgets import WidgetBridge
 from app.config import settings
 from app.conversations.schema import EventType
@@ -51,7 +56,7 @@ DEFAULT_SYSTEM_PROMPT = "You are PapaClaude, a helpful assistant."
 # contents), `glob` (match paths). All three surface as `read` permission
 # requests and are gated together by the native permission hook (see
 # native_permissions). Grow this list as edit/bash land.
-ENABLED_BUILTIN_TOOLS = ["view", "grep", "glob", "edit", "create"]
+ENABLED_BUILTIN_TOOLS = ["view", "grep", "glob", "edit", "create", "ask_user"]
 
 
 def _available_tools() -> ToolSet:
@@ -246,6 +251,7 @@ async def _open_session(
     system_prompt: str | None,
     tools: list,
     permission_handler,
+    user_input_handler=None,
     working_directory: str | None = None,
 ) -> CopilotSession:
     """Create a fresh session (bound to a session id we own) or resume one.
@@ -255,7 +261,9 @@ async def _open_session(
     (bash/edit/grep/…) stays unreachable. Custom tools are pre-approved; built-in
     tools are gated by `permission_handler`, which maps the per-agent
     `{auto|ask|deny}` config onto native decisions and routes `ask` to a widget.
-    `working_directory` attaches the agent to a filesystem directory.
+    The built-in `ask_user` tool routes through `user_input_handler` to a
+    choice/question widget. `working_directory` attaches the agent to a
+    filesystem directory.
     """
     kwargs = {
         "model": settings.copilot_model or None,
@@ -264,6 +272,8 @@ async def _open_session(
         "available_tools": _available_tools(),
         "on_permission_request": permission_handler,
     }
+    if user_input_handler is not None:
+        kwargs["on_user_input_request"] = user_input_handler
     if working_directory:
         kwargs["working_directory"] = working_directory
     if resume_session_id:
@@ -316,6 +326,7 @@ async def run_turn(
 
     tools = _build_tools(owner, allowed_tools, role, conversation_id, permissions, bridge)
     permission_handler = build_permission_handler(permissions, bridge)
+    user_input_handler = build_user_input_handler(bridge)
     session = await _open_session(
         client,
         owner,
@@ -324,6 +335,7 @@ async def run_turn(
         system_prompt,
         tools,
         permission_handler,
+        user_input_handler,
         working_directory,
     )
     logger.debug("Running turn for %s (resume=%s)", owner, resume_session_id)

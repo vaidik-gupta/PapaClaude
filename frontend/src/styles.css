@@ -777,6 +777,38 @@ label {
 .widget--diff {
   border-color: #7a4a1a;
 }
+.widget--choice,
+.widget--question {
+  border-color: #2f5fa0;
+}
+.widget__choices {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+}
+.widget__choices .btn {
+  text-align: left;
+}
+.widget__input {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--border, #333);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.3);
+  color: inherit;
+  font-size: 13px;
+}
+.widget__input:focus {
+  outline: 2px solid var(--accent, #5b8cff);
+  outline-offset: 1px;
+}
+.widget--choice:focus,
+.widget--choice:focus-visible {
+  outline: none;
+}
 .widget__diff {
   margin: 8px 0;
   padding: 8px;

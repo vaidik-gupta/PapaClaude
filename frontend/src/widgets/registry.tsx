@@ -1,8 +1,10 @@
 import type { ComponentType } from 'react';
 
 import type { WidgetResponsePayload } from '../api/types';
+import { ChoiceWidget } from './ChoiceWidget';
 import { DiffWidget } from './DiffWidget';
 import { PermissionWidget } from './PermissionWidget';
+import { QuestionWidget } from './QuestionWidget';
 
 // Props every live (interactive) widget component receives. `args` is the
 // opaque payload the backend tool sent; `onRespond` resolves the widget with a
@@ -34,6 +36,8 @@ export interface WidgetDef {
 const REGISTRY: Record<string, WidgetDef> = {
   permission: { component: PermissionWidget },
   diff: { component: DiffWidget },
+  choice: { component: ChoiceWidget },
+  question: { component: QuestionWidget },
 };
 
 // The live/interactive component for a widget id (undefined => fallback card).

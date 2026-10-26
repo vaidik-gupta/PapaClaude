@@ -203,12 +203,29 @@ are captured here but may slip.
      widget carrying a real git diff; "Allow left" "Deny→Reject" works.
      Remember-grant ("Allow for this turn") still pending (item 1).
 
-7. **Choice widget [build].** A thin wrapper tool (`ask_choice`) presenting N
-   options; response is the chosen value. Keyboard-navigable like the permission
-   widget. This is W43's "Pattern 2 — thin interaction tool."
+7. **Choice widget [build]. ✅ DONE.** Presents N options; response is the
+   chosen value. Keyboard-navigable like the permission widget.
+   - **Used the built-in, not a custom tool.** `ask_user` is a *native* SDK tool
+     whose elicitation request carries `{question, choices, allowFreeform}`. When
+     `choices` is non-empty we render the `choice` widget. (A first pass added a
+     custom `ask_choice` tool, but per "if it's built-in, use the built-in one"
+     we route the native `ask_user` instead — one tool covers both kinds.)
+   - **Landed:** `ChoiceWidget.tsx` (registry id `choice`) — question + option
+     buttons, ↑/↓ + Enter. Backend `user_input.build_user_input_handler` maps the
+     native `on_user_input_request` → choice widget → `{answer, wasFreeform}`.
+     Live-verified end-to-end.
 
-8. **Free-text question widget.** `ask_user(question)` → a text input widget →
-   returns the user's string. Lowest effort; pairs with choice.
+8. **Free-text question widget. ✅ DONE.** A text input → returns the user's
+   string. Same built-in `ask_user` path: when it offers no `choices`, we render
+   the `question` widget.
+   - **Landed:** `QuestionWidget.tsx` (registry id `question`) — text input,
+     Enter to submit (empty blocked), Esc cancels. `ask_user` enabled in
+     `ENABLED_BUILTIN_TOOLS`; the handler returns `wasFreeform=True` for a typed
+     answer. Live-verified: choice + free-text both round-trip through one
+     `ask_user` call. **Note:** `ask_user` is SDK-reserved — a custom tool of
+     that name is shadowed by the built-in's elicitation path (which errors with
+     "user was unable to respond" if unhandled), so wiring the native handler is
+     the only correct approach.
 
 ### Permissions UX
 
@@ -274,7 +291,9 @@ A tight, shippable slice (everything marked **[build]** above, phased):
    (one widget at a time per agent; frontend-only; no timeouts). Parallel
    async tool calls already work (SDK-verified).** *(Items 1, 5.)*
 2. **Widget kinds:** diff (from native `PermissionRequestWrite.diff`) + choice +
-   question widgets. *(Items 6, 7, 8.)*
+   question widgets. *(Items 6, 7, 8.)* ✅ **DONE** — diff via the write
+   permission hook; choice + question via the built-in `ask_user` elicitation
+   (`on_user_input_request`), not custom tools.
 3. **Permission UI** in PersonaPanel. *(Item 9.)*
 4. **Arsenal phase 1:** enable built-in read-only fs tools + `write_file`/edit
    behind the diff widget; `bash` deferred to phase 2. *(Item 11, partial.)*
