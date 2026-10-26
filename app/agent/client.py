@@ -21,7 +21,7 @@ from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from uuid import uuid4
 
-from copilot import CopilotClient, PermissionHandler
+from copilot import CopilotClient, PermissionHandler, ToolSet
 from copilot.session import CopilotSession
 from copilot.session_events import (
     AssistantMessageData,
@@ -35,6 +35,7 @@ from copilot.session_events import (
     AssistantUsageData as _UsageData,
 )
 
+from app.agent.native_permissions import build_permission_handler
 from app.agent.tools import build_content_tools, build_spawn_child_tool, gate_tools
 from app.agent.widgets import WidgetBridge
 from app.config import settings
@@ -44,6 +45,23 @@ from app.logging_config import get_logger
 logger = get_logger(__name__)
 
 DEFAULT_SYSTEM_PROMPT = "You are PapaClaude, a helpful assistant."
+
+# Built-in SDK tools enabled for a turn, in addition to our custom tools. These
+# are the read-type filesystem tools — `view` (read a file), `grep` (search
+# contents), `glob` (match paths). All three surface as `read` permission
+# requests and are gated together by the native permission hook (see
+# native_permissions). Grow this list as edit/bash land.
+ENABLED_BUILTIN_TOOLS = ["view", "grep", "glob", "edit", "create"]
+
+
+def _available_tools() -> ToolSet:
+    """The explicit tool allowlist for a turn: every custom tool we register
+    plus the enabled built-ins. Without this allowlist the runtime's built-in
+    fs/shell tools would be silently reachable and auto-approved."""
+    tools = ToolSet().add_custom("*")
+    for name in ENABLED_BUILTIN_TOOLS:
+        tools.add_builtin(name)
+    return tools
 
 # send_and_wait defaults to a 60s timeout — far too short for an agent turn.
 TURN_TIMEOUT_SECONDS = 600.0
@@ -227,19 +245,24 @@ async def _open_session(
     new_session_id: str,
     system_prompt: str | None,
     tools: list,
+    permission_handler,
     working_directory: str | None = None,
 ) -> CopilotSession:
     """Create a fresh session (bound to a session id we own) or resume one.
 
-    The agent is sandboxed to a per-user content tool surface: only our
-    user-bound tools, pre-approved so no permission prompt is raised.
+    The agent's tool surface is an explicit allowlist (`_available_tools`): our
+    user-bound custom tools plus the enabled built-ins — every other built-in
+    (bash/edit/grep/…) stays unreachable. Custom tools are pre-approved; built-in
+    tools are gated by `permission_handler`, which maps the per-agent
+    `{auto|ask|deny}` config onto native decisions and routes `ask` to a widget.
     `working_directory` attaches the agent to a filesystem directory.
     """
     kwargs = {
         "model": settings.copilot_model or None,
         "tools": tools,
         "system_message": _system_message(system_prompt),
-        "on_permission_request": PermissionHandler.approve_all,
+        "available_tools": _available_tools(),
+        "on_permission_request": permission_handler,
     }
     if working_directory:
         kwargs["working_directory"] = working_directory
@@ -292,8 +315,16 @@ async def run_turn(
             queue.put_nowait(AgentEvent(EventType.RESULT, state.result_payload(session_id)))
 
     tools = _build_tools(owner, allowed_tools, role, conversation_id, permissions, bridge)
+    permission_handler = build_permission_handler(permissions, bridge)
     session = await _open_session(
-        client, owner, resume_session_id, session_id, system_prompt, tools, working_directory
+        client,
+        owner,
+        resume_session_id,
+        session_id,
+        system_prompt,
+        tools,
+        permission_handler,
+        working_directory,
     )
     logger.debug("Running turn for %s (resume=%s)", owner, resume_session_id)
 

@@ -83,8 +83,12 @@ export function ChatPane({
   // Live events for the in-flight turn.
   const [liveEvents, setLiveEvents] = useState<ConvEvent[]>([]);
   const [livePrompt, setLivePrompt] = useState<string | null>(null);
-  // An in-flight widget blocking the composer until the user responds.
-  const [pendingWidget, setPendingWidget] = useState<WidgetPayload | null>(null);
+  // Per-pane FIFO queue of widgets awaiting the user. Only the head (index 0)
+  // is shown; the rest wait their turn and appear one by one as each resolves.
+  // One widget at a time *per agent* — other panes queue independently.
+  const [widgetQueue, setWidgetQueue] = useState<WidgetPayload[]>([]);
+  // The widget currently shown (head of the queue), or null if none pending.
+  const pendingWidget = widgetQueue[0] ?? null;
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const streamRef = useRef<{ cancel: () => void } | null>(null);
@@ -106,7 +110,7 @@ export function ChatPane({
     setBlocks([]);
     setLiveEvents([]);
     setLivePrompt(null);
-    setPendingWidget(null);
+    setWidgetQueue([]);
     getConversation(convId)
       .then((detail: ConversationDetail) => {
         if (cancelled) return;
@@ -148,10 +152,10 @@ export function ChatPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Report "needs you" state up (a pending widget) and clear it on unmount.
+  // Report "needs you" state up (any pending widget) and clear it on unmount.
   useEffect(() => {
-    onWidgetPendingChange?.(pendingWidget !== null);
-  }, [pendingWidget, onWidgetPendingChange]);
+    onWidgetPendingChange?.(widgetQueue.length > 0);
+  }, [widgetQueue.length, onWidgetPendingChange]);
   useEffect(() => {
     return () => onWidgetPendingChange?.(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -179,7 +183,7 @@ export function ChatPane({
     setPrompt('');
     setLivePrompt(text);
     setLiveEvents([]);
-    setPendingWidget(null);
+    setWidgetQueue([]);
     setStreaming(true);
 
     collectedRef.current = [];
@@ -192,12 +196,16 @@ export function ChatPane({
       (ev) => {
         collectedRef.current.push(ev);
         setLiveEvents((prev) => [...prev, ev]);
-        // A tool is asking for input: block the composer with its widget.
+        // A tool is asking for input: queue its widget (shown one at a time).
         if (ev.type === 'widget') {
-          setPendingWidget(ev.payload);
+          // Enqueue; shows immediately if the queue was empty, otherwise it
+          // waits behind the widgets already pending in this pane.
+          setWidgetQueue((q) => [...q, ev.payload]);
         } else if (ev.type === 'widget_response') {
-          setPendingWidget((cur) =>
-            cur && cur.instance_id === ev.payload.instance_id ? null : cur,
+          // Resolved (answered/cancelled) — drop it; the next queued widget
+          // (if any) becomes the head and is shown.
+          setWidgetQueue((q) =>
+            q.filter((w) => w.instance_id !== ev.payload.instance_id),
           );
         }
         // Detect a spawn_child tool_result to refresh children.
@@ -240,7 +248,7 @@ export function ChatPane({
     streamRef.current = null;
     setLivePrompt(null);
     setLiveEvents([]);
-    setPendingWidget(null);
+    setWidgetQueue([]);
     setBlocks((prev) => [
       ...prev,
       { kind: 'user', key: `live-${Date.now()}-p`, text: userText },
@@ -255,12 +263,13 @@ export function ChatPane({
     }
   };
 
-  // Answer the pending widget: POST the value; the awaiting tool unblocks and
-  // the turn continues on the same SSE stream (which emits widget_response).
+  // Answer the current (head) widget: POST the value; the awaiting tool unblocks
+  // and the turn continues on the same SSE stream (which emits widget_response).
+  // Dequeue the head so the next queued widget (if any) shows immediately.
   const answerWidget = (value: Record<string, unknown>) => {
     const w = pendingWidget;
     if (!w) return;
-    setPendingWidget(null);
+    setWidgetQueue((q) => q.filter((x) => x.instance_id !== w.instance_id));
     respondWidget(convId, w.instance_id, value).catch((e: Error) =>
       error(`Failed to respond: ${e.message}`),
     );
@@ -301,12 +310,18 @@ export function ChatPane({
           <div className="widget-overlay">
             {WidgetComponent ? (
               <WidgetComponent
+                key={pendingWidget.instance_id}
                 args={pendingWidget.args}
                 onRespond={answerWidget}
               />
             ) : (
               <div className="widget widget--unknown">
                 Unknown widget “{pendingWidget.widget_id}”. Press Esc to cancel.
+              </div>
+            )}
+            {widgetQueue.length > 1 && (
+              <div className="widget-queue-hint">
+                +{widgetQueue.length - 1} more waiting
               </div>
             )}
           </div>

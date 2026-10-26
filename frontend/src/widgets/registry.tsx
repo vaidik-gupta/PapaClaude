@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react';
 
 import type { WidgetResponsePayload } from '../api/types';
+import { DiffWidget } from './DiffWidget';
 import { PermissionWidget } from './PermissionWidget';
 
 // Props every live (interactive) widget component receives. `args` is the
@@ -32,6 +33,7 @@ export interface WidgetDef {
 // generic summary card (resolved).
 const REGISTRY: Record<string, WidgetDef> = {
   permission: { component: PermissionWidget },
+  diff: { component: DiffWidget },
 };
 
 // The live/interactive component for a widget id (undefined => fallback card).

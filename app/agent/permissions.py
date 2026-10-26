@@ -20,7 +20,11 @@ DENY = "deny"
 PERMISSIONS = (AUTO, ASK, DENY)
 
 # Default stance per tool when a manifest does not specify one: read-only tools
-# run freely; the destructive `delete` asks.
+# run freely; the destructive `delete` asks. Built-in tools are gated by
+# capability, not tool name: `read` covers every filesystem read (view/grep/glob)
+# and `write` covers every filesystem write (edit/create), which the SDK surfaces
+# indistinguishably as `read`/`write` permission requests. Both ask by default so
+# a read/write surfaces the permission widget until a manifest opts it to `auto`.
 DEFAULT_PERMISSIONS: dict[str, str] = {
     "inspect_tree": AUTO,
     "list_data": AUTO,
@@ -28,6 +32,8 @@ DEFAULT_PERMISSIONS: dict[str, str] = {
     "add": AUTO,
     "delete": ASK,
     "spawn_child": AUTO,
+    "read": ASK,
+    "write": ASK,
 }
 
 

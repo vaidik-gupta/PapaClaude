@@ -128,12 +128,11 @@ are captured here but may slip.
    - Add an **"Allow for this turn"** option to the permission widget (keyboard:
      a third selectable option) — one UI, mapped to the right mechanism per path.
 
-2. **Widget timeout [build].** A pending widget must not hang a turn forever.
-   - `present_widget(..., timeout=DEFAULT_WIDGET_TIMEOUT)`; on expiry emit
-     `widget_response status=timeout`, raise `WidgetTimeout` (a sibling of
-     `WidgetCancelled`), the tool returns a failure `ToolResult`.
-   - Default ~120s; make it a constant. Frontend shows a countdown or a muted
-     "expires soon" hint (nice-to-have).
+2. **Widget timeout — DROPPED.** ~~A pending widget must not hang a turn
+   forever.~~ Product decision: **no timeouts.** A widget waits indefinitely for
+   the user; queued widgets (item 5) simply wait their turn. No `WidgetTimeout`,
+   no countdown, no auto-expiry. (A turn can still be ended explicitly via
+   Stop/Esc, which cancels pending widgets as today.)
 
 3. **Tab-switch / reload resilience.** ~~`ChatPane` is keyed on conversation id, so
    switching tabs mid-widget unmounts it → aborts the SSE fetch.~~
@@ -151,22 +150,58 @@ are captured here but may slip.
    workers would break cross-request resolution. Document the constraint now;
    a shared store (Redis pub/sub or DB-backed future) is a scaling-time task.
 
-5. **Parallel tool calls.** Today only one widget blocks at a time; if the model
-   batches tool calls that each want a widget, behavior is undefined.
-   - Decide: **serialize** (queue widgets, present one at a time) vs. allow
-     multiple stacked widgets. Lean: serialize this week (a FIFO on the bridge),
-     stacked UI later.
+5. **Parallel tool calls [build].** Tool calls must be **async and run
+   concurrently** — a tool only blocks when it is waiting on a widget, never on
+   other tool calls. The SDK already dispatches batched tool calls as
+   independent `asyncio` tasks (verified in `copilot/session.py`
+   `_handle_broadcast_event` → one `create_task` per `ExternalToolRequestedData`,
+   no client-side lock), and our handlers are `async` and offload sync I/O via
+   `asyncio.to_thread`, so this already works end-to-end today.
+   - **Concurrent execution within an agent:** a single agent can fire N tool
+     calls at once (e.g. 6 `read_file`) and they execute in parallel.
+   - **Concurrent execution across agents:** each agent/conversation runs its own
+     turn + `WidgetBridge`, so agents run their tool calls independently and
+     simultaneously; one agent's pending widget never blocks another's tools.
+   - **Widgets are the *only* blocking point.** When a tool needs human input it
+     awaits a widget; that `await` suspends only that one tool call.
+   - **One widget at a time *per agent* (per-pane FIFO queue) — frontend only.**
+     Each agent's pane shows **one** widget at a time. If that agent's tool calls
+     request multiple widgets concurrently, the extras **queue per pane** and
+     appear **one by one** in FIFO order — the next shows only after the current
+     is answered/cancelled. Different agents (different panes) are independent and
+     may each show their own widget at the same time; there is **no** global
+     cross-agent queue.
+     - **Implementation is frontend-only.** The backend already emits each
+       `widget` event and awaits its own future immediately (all futures pending
+       at once is fine). `ChatPane` just needs to turn its single
+       `pendingWidget` slot into a FIFO array: enqueue incoming `widget` events,
+       render only the head, dequeue on answer, then show the next. No backend /
+       `WidgetBridge` / `PendingWidgets` change required.
+     - **Fixes a current bug:** today `setPendingWidget(ev.payload)` *overwrites*
+       an in-flight widget, so a second concurrent widget clobbers the first
+       (whose future then hangs). The per-pane queue replaces last-wins with
+       proper one-at-a-time ordering.
+     - **No timeouts.** Queued widgets simply wait their turn; nothing expires.
 
 ### Widget kinds — the arsenal needs these
 
-6. **Diff-review widget [build].** For edit/write tools: show a unified diff
-   (path + before/after), Allow / Deny (/ "Allow for this turn").
+6. **Diff-review widget [build]. ✅ DONE.** For edit/write tools: show a unified
+   diff (path + before/after), Allow / Deny (/ "Allow for this turn").
    - **Built-in writes give this for free:** `PermissionRequestWrite` already
      carries `file_name`, a ready `diff` string, and `new_file_contents`. The
      async `on_permission_request` maps that straight into a `widget_id="diff"`
      payload; the answer becomes `ApproveOnce`/`ApproveForSession`/`Reject`. No
      tool-side diff computation needed.
    - For our own future custom edit tools, same widget, payload `{path, diff}`.
+   - **Landed:** `DiffWidget.tsx` (registry id `diff`) renders the unified diff
+     with add/del/hunk coloring + keyboard Allow/Deny. Backend
+     `native_permissions` maps `PermissionRequestWrite` → `"write"` key →
+     `widget_id="diff"` with `{tool, file_name, diff, summary}`. `edit` and
+     `create` are enabled (`ENABLED_BUILTIN_TOOLS`) and both surface as `write`
+     (indistinguishable at the permission layer, like the reads). `write`
+     defaults to `ask`. Live-verified: create + edit both route through the diff
+     widget carrying a real git diff; "Allow left" "Deny→Reject" works.
+     Remember-grant ("Allow for this turn") still pending (item 1).
 
 7. **Choice widget [build].** A thin wrapper tool (`ask_choice`) presenting N
    options; response is the chosen value. Keyboard-navigable like the permission
@@ -235,8 +270,9 @@ A tight, shippable slice (everything marked **[build]** above, phased):
    overlay; set an explicit `available_tools` allowlist. This unblocks items 1,
    6, and 11 and closes the silent-auto-approve gap. *(SDK discovery §.)*
 1. **Permission hardening:** remember-grant ("Allow for this turn/session", via
-   native `ApproveForSession` for built-ins) + widget timeout +
-   serialize-widgets. *(Items 1, 2, 5.)*
+   native `ApproveForSession` for built-ins) + **per-pane widget FIFO queue
+   (one widget at a time per agent; frontend-only; no timeouts). Parallel
+   async tool calls already work (SDK-verified).** *(Items 1, 5.)*
 2. **Widget kinds:** diff (from native `PermissionRequestWrite.diff`) + choice +
    question widgets. *(Items 6, 7, 8.)*
 3. **Permission UI** in PersonaPanel. *(Item 9.)*
@@ -262,13 +298,24 @@ Deferred to a later week: full turn replay (3, full), multi-worker widget store
   turn/session" option, and should either persist back to the manifest as `auto`?
 - **Diff source of truth:** built-in writes hand us `diff` directly; our own
   future edit tools send a unified diff string. Widget just renders — confirmed.
-- **Tool name mapping:** confirm the exact runtime tool names
-  (`view` vs `read_file`, `shell` vs `bash`, `Glob` casing) by enumerating a live
-  session's registered tools before writing `DEFAULT_PERMISSIONS` keys.
+- **Tool name mapping (RESOLVED by live enumeration):** a live session registers
+  the read-type built-ins as `view` (read file), `grep`, `glob` (lowercase), plus
+  `edit`/`create`, `bash`, `web_fetch`/`web_search`, and the orchestration set.
+  **Important permission finding:** `view`, `grep`, and `glob` are
+  *indistinguishable at the permission layer* — each surfaces as a
+  `PermissionRequestRead` (kind `read`) carrying only a `path`, never the tool
+  name. So reads are gated by a **single `read` capability key**, not one key per
+  tool; `DEFAULT_PERMISSIONS["read"]` governs all three. Per-tool read config is
+  not possible via the native hook. (Write will map Shell/`bash`→"bash",
+  Write/`edit`→"edit" similarly, by request kind.)
 - **Response schema validation:** still opaque per `widget_id`, or validate
   responses against a per-widget schema now that there are several kinds?
-- **Serialized vs. stacked widgets** when tool calls are parallel (native hook
-  gives each request a `tool_call_id`, which makes correlation tractable).
+- **Serialized widgets (DECIDED):** widgets are queued **per agent/pane** (a
+  frontend FIFO in `ChatPane`) and shown one at a time; concurrent widgets from
+  the same agent wait and appear one by one. Different agents (different panes)
+  are independent and may each show a widget simultaneously — **no global
+  cross-agent queue**. Non-widget tool calls are never serialized and run in
+  parallel. No timeouts. Stacked UI is out of scope.
 - **bash safety:** sandbox/allowlist, timeout, output capture, and whether it
   ever gets a remember-grant (lean: never — always `ApproveOnce` or `Reject`).
 - **Children tools:** inherit Papa's permission config + `available_tools`, or
