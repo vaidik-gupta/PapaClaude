@@ -49,8 +49,6 @@ from app.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-DEFAULT_SYSTEM_PROMPT = "You are PapaClaude, a helpful assistant."
-
 # Built-in SDK tools enabled for a turn, in addition to our custom tools. These
 # are the read-type filesystem tools — `view` (read a file), `grep` (search
 # contents), `glob` (match paths). All three surface as `read` permission
@@ -126,7 +124,22 @@ async def _get_client() -> CopilotClient:
 
 
 def _system_message(system_prompt: str | None) -> dict:
-    return {"mode": "replace", "content": system_prompt or DEFAULT_SYSTEM_PROMPT}
+    """Append our persona instructions onto Copilot's built-in coding-agent
+    system prompt rather than replacing it.
+
+    `append` mode keeps the full CLI foundation — identity, tool-efficiency and
+    parallel-calling guidance, code-change rules, safety guardrails, and per-tool
+    instructions — and adds our persona content on top, so a persona is an
+    *add-on* to Copilot's proven coding behavior, not a wholesale replacement.
+    (`replace` mode, used previously, discarded all of that — including the SDK's
+    security restrictions.) With no persona prompt we append nothing and run on
+    the pure foundation.
+    """
+    content = (system_prompt or "").strip()
+    message: dict = {"mode": "append"}
+    if content:
+        message["content"] = content
+    return message
 
 
 # --- Event translation --------------------------------------------------------
