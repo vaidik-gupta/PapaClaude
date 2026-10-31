@@ -9,10 +9,8 @@ import type { WidgetProps } from './registry';
 //
 // Fully keyboard-operable: grabs focus on mount; ←/→/↑/↓ move the selection,
 // Enter confirms. Deny is selected by default (safer for a mutating action).
-const OPTIONS = [
-  { label: 'Deny', value: { granted: false }, variant: '' },
-  { label: 'Allow', value: { granted: true }, variant: 'danger' },
-] as const;
+// When the backend attaches a `remember` descriptor, a third option offers a
+// clearly-labelled persistent grant (e.g. "Always allow writes in <git root>").
 
 // Classify a unified-diff line for syntax coloring.
 function lineClass(line: string): string {
@@ -28,8 +26,32 @@ export function DiffWidget({ args, onRespond }: WidgetProps) {
   const fileName = typeof args.file_name === 'string' ? args.file_name : null;
   const summary = typeof args.summary === 'string' ? args.summary : null;
   const diff = typeof args.diff === 'string' ? args.diff : '';
+  const remember = args.remember as { label?: string } | undefined;
+  const rememberLabel =
+    typeof remember?.label === 'string' ? remember.label : null;
 
   const lines = useMemo(() => diff.split('\n'), [diff]);
+
+  const options = useMemo(
+    () => [
+      { label: 'Deny', value: { granted: false }, variant: '' },
+      {
+        label: rememberLabel ? 'Allow once' : 'Allow',
+        value: { granted: true, scope: 'once' },
+        variant: 'danger',
+      },
+      ...(rememberLabel
+        ? [
+            {
+              label: rememberLabel,
+              value: { granted: true, scope: 'remember' },
+              variant: 'danger',
+            },
+          ]
+        : []),
+    ],
+    [rememberLabel],
+  );
 
   const [selected, setSelected] = useState(0); // default: Deny
   const rootRef = useRef<HTMLDivElement>(null);
@@ -42,13 +64,13 @@ export function DiffWidget({ args, onRespond }: WidgetProps) {
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
       e.preventDefault();
-      setSelected((i) => (i - 1 + OPTIONS.length) % OPTIONS.length);
+      setSelected((i) => (i - 1 + options.length) % options.length);
     } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
       e.preventDefault();
-      setSelected((i) => (i + 1) % OPTIONS.length);
+      setSelected((i) => (i + 1) % options.length);
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      onRespond({ ...OPTIONS[selected].value });
+      onRespond({ ...options[selected].value });
     }
     // Esc intentionally bubbles: ChatPane cancels the whole turn.
   };
@@ -78,7 +100,7 @@ export function DiffWidget({ args, onRespond }: WidgetProps) {
         <p className="widget__summary">(No diff provided.)</p>
       )}
       <div className="widget__actions">
-        {OPTIONS.map((opt, i) => (
+        {options.map((opt, i) => (
           <button
             key={opt.label}
             type="button"

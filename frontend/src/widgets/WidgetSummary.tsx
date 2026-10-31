@@ -7,8 +7,9 @@ interface Props {
   response: WidgetResponsePayload | null;
 }
 
-// Human-readable outcome label for a resolved widget. `permission` widgets carry
-// a `granted` boolean; everything else falls back to the status / raw value.
+// Human-readable outcome label for a resolved widget. `permission` and `diff`
+// widgets carry a `granted` boolean (and a `scope`); everything else falls back
+// to the status / raw value.
 function outcomeLabel(
   widgetId: string,
   response: WidgetResponsePayload | null,
@@ -17,10 +18,11 @@ function outcomeLabel(
     return { text: 'Cancelled', tone: 'muted' };
   }
   const value = response.value ?? {};
-  if (widgetId === 'permission') {
-    return value.granted
-      ? { text: 'Allowed', tone: 'ok' }
-      : { text: 'Denied', tone: 'deny' };
+  if (widgetId === 'permission' || widgetId === 'diff') {
+    if (!value.granted) return { text: 'Denied', tone: 'deny' };
+    return value.scope === 'remember'
+      ? { text: 'Allowed (remembered)', tone: 'ok' }
+      : { text: 'Allowed', tone: 'ok' };
   }
   if (typeof value.value === 'string') {
     return { text: value.value, tone: 'ok' };

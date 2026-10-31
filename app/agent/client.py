@@ -51,10 +51,21 @@ logger = get_logger(__name__)
 
 # Built-in SDK tools enabled for a turn, in addition to our custom tools. These
 # are the read-type filesystem tools — `view` (read a file), `grep` (search
-# contents), `glob` (match paths). All three surface as `read` permission
-# requests and are gated together by the native permission hook (see
-# native_permissions). Grow this list as edit/bash land.
-ENABLED_BUILTIN_TOOLS = ["view", "grep", "glob", "edit", "create", "ask_user"]
+# contents), `glob` (match paths) — plus the write tools (`edit`/`create`), the
+# shell (`bash`), web access (`web_fetch`/`web_search`), and the `ask_user`
+# elicitation primitive. Each is gated by capability via the native permission
+# hook (reads together, writes together, shell, url); see native_permissions.
+ENABLED_BUILTIN_TOOLS = [
+    "view",
+    "grep",
+    "glob",
+    "edit",
+    "create",
+    "bash",
+    "web_fetch",
+    "web_search",
+    "ask_user",
+]
 
 
 def _available_tools() -> ToolSet:
@@ -338,7 +349,7 @@ async def run_turn(
             queue.put_nowait(AgentEvent(EventType.RESULT, state.result_payload(session_id)))
 
     tools = _build_tools(owner, allowed_tools, role, conversation_id, permissions, bridge)
-    permission_handler = build_permission_handler(permissions, bridge)
+    permission_handler = build_permission_handler(permissions, bridge, working_directory)
     user_input_handler = build_user_input_handler(bridge)
     session = await _open_session(
         client,

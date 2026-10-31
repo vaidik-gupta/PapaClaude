@@ -10,11 +10,15 @@ import asyncio
 
 import pytest
 from copilot.generated.rpc import (
+    PermissionDecisionApproveForLocation,
+    PermissionDecisionApproveForSession,
     PermissionDecisionApproveOnce,
     PermissionDecisionReject,
 )
 from copilot.generated.session_events import (
     PermissionRequestRead,
+    PermissionRequestShell,
+    PermissionRequestUrl,
     PermissionRequestWrite,
 )
 
@@ -36,6 +40,22 @@ def _write(
         file_name=file_name,
         intention="write it",
     )
+
+
+def _shell(command: str = "ls -la") -> PermissionRequestShell:
+    return PermissionRequestShell(
+        can_offer_session_approval=True,
+        commands=[],
+        full_command_text=command,
+        has_write_file_redirection=False,
+        intention="run it",
+        possible_paths=[],
+        possible_urls=[],
+    )
+
+
+def _url(url: str = "https://example.com") -> PermissionRequestUrl:
+    return PermissionRequestUrl(intention="fetch it", url=url)
 
 
 def _bridge(registry: PendingWidgets):
@@ -179,5 +199,153 @@ async def test_write_defaults_to_ask_when_unconfigured():
 
     assert emitted and emitted[0][0] == EventType.WIDGET
     assert emitted[0][1]["widget_id"] == "diff"
+    reg.resolve(emitted[0][1]["instance_id"], "conv-1", {"granted": False})
+    await task
+
+
+async def test_shell_ask_presents_permission_widget_then_approves():
+    reg = PendingWidgets()
+    bridge, emitted = _bridge(reg)
+    handler = build_permission_handler({"shell": "ask"}, bridge)
+
+    task = asyncio.create_task(handler(_shell("rm -rf /tmp/x"), {"session_id": "s"}))
+    await asyncio.sleep(0)
+
+    assert emitted[0][0] == EventType.WIDGET
+    payload = emitted[0][1]
+    assert payload["widget_id"] == "permission"  # shell uses the compact confirm card
+    assert payload["args"]["tool"] == "shell"
+    assert payload["args"]["args"] == {"command": "rm -rf /tmp/x"}
+
+    assert reg.resolve(payload["instance_id"], "conv-1", {"granted": True}) is True
+    result = await task
+    assert isinstance(result, PermissionDecisionApproveOnce)
+
+
+async def test_shell_defaults_to_ask_when_unconfigured():
+    reg = PendingWidgets()
+    bridge, emitted = _bridge(reg)
+    handler = build_permission_handler(None, bridge)
+
+    task = asyncio.create_task(handler(_shell(), {"session_id": "s"}))
+    await asyncio.sleep(0)
+
+    assert emitted and emitted[0][1]["widget_id"] == "permission"
+    reg.resolve(emitted[0][1]["instance_id"], "conv-1", {"granted": False})
+    result = await task
+    assert isinstance(result, PermissionDecisionReject)
+
+
+async def test_url_ask_presents_permission_widget_then_approves():
+    reg = PendingWidgets()
+    bridge, emitted = _bridge(reg)
+    handler = build_permission_handler({"url": "ask"}, bridge)
+
+    task = asyncio.create_task(
+        handler(_url("https://api.example.com"), {"session_id": "s"})
+    )
+    await asyncio.sleep(0)
+
+    assert emitted[0][0] == EventType.WIDGET
+    payload = emitted[0][1]
+    assert payload["widget_id"] == "permission"
+    assert payload["args"]["tool"] == "url"
+    assert payload["args"]["args"] == {"url": "https://api.example.com"}
+
+    assert reg.resolve(payload["instance_id"], "conv-1", {"granted": True}) is True
+    result = await task
+    assert isinstance(result, PermissionDecisionApproveOnce)
+
+
+async def test_url_defaults_to_ask_when_unconfigured():
+    reg = PendingWidgets()
+    bridge, emitted = _bridge(reg)
+    handler = build_permission_handler(None, bridge)
+
+    task = asyncio.create_task(handler(_url(), {"session_id": "s"}))
+    await asyncio.sleep(0)
+
+    assert emitted and emitted[0][1]["widget_id"] == "permission"
+    reg.resolve(emitted[0][1]["instance_id"], "conv-1", {"granted": False})
+    result = await task
+    assert isinstance(result, PermissionDecisionReject)
+
+
+# --- Remember-grant decisions (built-in tools) ------------------------------
+
+from copilot.generated.session_events import PermissionRequestShellCommand
+
+
+def _shell_with(identifier: str, command: str) -> PermissionRequestShell:
+    return PermissionRequestShell(
+        can_offer_session_approval=True,
+        commands=[PermissionRequestShellCommand(identifier=identifier, read_only=False)],
+        full_command_text=command,
+        has_write_file_redirection=False,
+        intention="run it",
+        possible_paths=[],
+        possible_urls=[],
+    )
+
+
+async def _answer(handler, request, reply):
+    """Drive one ask through the bridge, replying with `reply`, return decision."""
+    reg = PendingWidgets()
+    bridge, emitted = _bridge(reg)
+    h = handler(bridge)
+    task = asyncio.create_task(h(request, {"session_id": "s"}))
+    await asyncio.sleep(0)
+    payload = emitted[0][1]
+    reg.resolve(payload["instance_id"], "conv-1", reply)
+    return await task, payload
+
+
+async def test_write_remember_returns_approve_for_location():
+    handler = lambda b: build_permission_handler(  # noqa: E731
+        {"write": "ask"}, b, working_directory="/tmp"
+    )
+    result, payload = await _answer(
+        handler, _write("/tmp/x.py"), {"granted": True, "scope": "remember"}
+    )
+    assert isinstance(result, PermissionDecisionApproveForLocation)
+    assert result.location_key  # git root / cwd fallback
+    assert payload["args"]["remember"]["label"].startswith("Always allow writes in")
+
+
+async def test_shell_remember_returns_session_commands():
+    handler = lambda b: build_permission_handler({"shell": "ask"}, b)  # noqa: E731
+    result, payload = await _answer(
+        handler, _shell_with("echo", "echo hi"), {"granted": True, "scope": "remember"}
+    )
+    assert isinstance(result, PermissionDecisionApproveForSession)
+    assert result.approval.command_identifiers == ["echo"]
+    assert "`echo`" in payload["args"]["remember"]["label"]
+
+
+async def test_url_remember_returns_session_domain():
+    handler = lambda b: build_permission_handler({"url": "ask"}, b)  # noqa: E731
+    result, payload = await _answer(
+        handler, _url("https://api.example.com/x"), {"granted": True, "scope": "remember"}
+    )
+    assert isinstance(result, PermissionDecisionApproveForSession)
+    assert result.domain == "api.example.com"
+    assert "api.example.com" in payload["args"]["remember"]["label"]
+
+
+async def test_scope_once_approves_only_once_despite_remember_available():
+    handler = lambda b: build_permission_handler({"url": "ask"}, b)  # noqa: E731
+    result, _ = await _answer(
+        handler, _url("https://x.com"), {"granted": True, "scope": "once"}
+    )
+    assert isinstance(result, PermissionDecisionApproveOnce)
+
+
+async def test_read_offers_no_remember_option():
+    reg = PendingWidgets()
+    bridge, emitted = _bridge(reg)
+    handler = build_permission_handler({"read": "ask"}, bridge)
+    task = asyncio.create_task(handler(_read(), {"session_id": "s"}))
+    await asyncio.sleep(0)
+    assert "remember" not in emitted[0][1]["args"]  # reads get once/deny only
     reg.resolve(emitted[0][1]["instance_id"], "conv-1", {"granted": False})
     await task

@@ -116,17 +116,30 @@ are captured here but may slip.
 
 ### Widget robustness (bites first in real use)
 
-1. **Remember grants / "allow all" [build].** An `ask`→allow should be able to
-   stick, so a batch of calls isn't a prompt storm.
-   - **Native path (built-in tools):** return `PermissionDecisionApproveForSession`
-     from `on_permission_request` when the widget's "Allow for this turn/session"
-     option is chosen — the SDK then stops re-prompting for that tool/location.
-     `PermissionDecisionApproveForLocation` gives per-path grants for free.
-   - **Custom path (our tools):** lean rule unchanged — remember an allow
-     **per-tool for the rest of the turn** on the `WidgetBridge`; destructive
-     tools (`delete`) still always ask unless "Allow for this turn" is chosen.
-   - Add an **"Allow for this turn"** option to the permission widget (keyboard:
-     a third selectable option) — one UI, mapped to the right mechanism per path.
+1. **Remember grants / "allow all" [build]. ✅ DONE (built-in tools).** An
+   `ask`→allow can now stick, so a batch of calls isn't a prompt storm.
+   - **Landed (built-in tools, native path):** the permission + diff widgets show
+     a **third, scope-labelled** option whose text states exactly what persists
+     (no generic "allow for session"). On selection the native handler returns the
+     kind-specific decision; the Copilot runtime then stops re-prompting:
+     - **write** → `ApproveForLocation(Write, location_key=<git root>)` — "Always
+       allow writes in `<git root>`" (persisted across sessions; the SDK has no
+       per-file grant, only per project location).
+     - **shell** → `ApproveForSession(Commands[identifiers])` — "Approve `<cmd>`
+       commands this session" (per command identifier).
+     - **url** → `ApproveForSession(domain=<host>)` — "Approve calls to `<host>`
+       this session" (per domain).
+     - **read** → no remember option (once/deny only); reads don't advertise
+       session approval and the only session grant would be *all* reads.
+   - Scope flows as `{granted, scope: "once"|"remember"}`; `remember` →
+     kind-specific decision, `once` → `ApproveOnce`. Only offered when the request
+     exposes a sensible grant (`_remember_option`). Live-verified: url shows
+     "Approve calls to example.com this session", shell shows the command label;
+     both complete and the runtime remembers.
+   - **Custom path (our tools) — DEPRECATED.** The per-turn remember on the
+     `WidgetBridge` was an AI-introduced feature that was never required; it is
+     **removed from scope**. Custom tools stay once/deny for now; a custom-tool
+     remember mechanism can be revisited later if actually needed.
 
 2. **Widget timeout — DROPPED.** ~~A pending widget must not hang a turn
    forever.~~ Product decision: **no timeouts.** A widget waits indefinitely for
@@ -240,22 +253,20 @@ are captured here but may slip.
 
 ### The arsenal itself
 
-11. **Filesystem / bash / edit tools [build, phased] — ENABLE, don't rebuild.**
+11. **Filesystem / bash / edit / web tools [build, phased] — ENABLE, don't rebuild. ✅ DONE (sans remember-grants).**
     Per the SDK discovery, these are **built-in**; the work is configuration +
     the native permission bridge, not reimplementation.
-    - **Enable + scope:** set `available_tools` (a `ToolSet`) on `create_session`
-      so the agent gets built-in `view`/`read_file`, `grep`, `Glob`,
-      `write_file`/edit, and (phase 2) `shell`/`bash`, all rooted at the agent's
-      `working_directory` (the W43 directory attachment).
-    - **Replace blanket approval:** swap `on_permission_request=approve_all` for
-      an **async handler** that maps the per-agent `{tool: auto|ask|deny}` config
-      → `ApproveOnce` / present-widget / `Reject`, feeding the W43 `WidgetBridge`.
-    - **Proposed defaults** in `DEFAULT_PERMISSIONS` (native tool names):
-      `read_file`/`view`, `grep`, `Glob` → `auto`; `write_file`/edit → `ask`
-      (diff widget); `shell`/`bash` → `ask` (always; never remembered);
-      `change_directory` → `ask`.
-    - Phase 1: read-only + `write_file`/edit behind the diff widget. Phase 2:
-      `bash` with explicit per-call confirmation and no remembering.
+    - **Landed:** `ENABLED_BUILTIN_TOOLS` now enables read (`view`/`grep`/`glob`),
+      write (`edit`/`create`), shell (`bash`), and web (`web_fetch`/`web_search`),
+      plus `ask_user`. Each is gated by **capability** through the native
+      `on_permission_request` hook: `read`→permission widget, `write`→diff widget,
+      `shell`→permission widget (yes/no on `full_command_text`), `url`→permission
+      widget (yes/no on the URL). All four default to `ask` in
+      `DEFAULT_PERMISSIONS`. Live-verified: `bash` surfaces `Run \`echo …\``;
+      `web_fetch` surfaces `Fetch https://…`, both through the permission widget.
+    - **Remember-grants not yet wired** — shell/url are plain `ApproveOnce` /
+      `Reject` for now (item 1 adds "Allow for this turn/session"). Per product
+      decision shell should likely *never* be remembered (always ask).
 
 12. **Children get tools.** `default-child` has an empty `allowed_tools`, so
     spawned workers can't act. Give children a sensible default tool set once the

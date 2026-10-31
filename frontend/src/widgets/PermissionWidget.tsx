@@ -1,22 +1,44 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { WidgetProps } from './registry';
 
-// A permission request raised by a gated tool (e.g. `delete`). The user must
-// Allow or Deny before the tool proceeds; Esc/Stop cancels the whole turn.
+// A permission request raised by a gated tool (e.g. `delete`) or a built-in
+// read/shell/url tool. The user must Allow or Deny before the tool proceeds;
+// Esc/Stop cancels the whole turn. When the backend attaches a `remember`
+// descriptor, a third option offers a clearly-labelled persistent grant (e.g.
+// "Approve calls to example.com this session").
 //
 // Fully keyboard-operable: the widget grabs focus on mount; ←/→/↑/↓ move the
-// selection, Enter confirms it. Deny is selected by default (safer for a
-// destructive action).
-const OPTIONS = [
-  { label: 'Deny', value: { granted: false }, variant: '' },
-  { label: 'Allow', value: { granted: true }, variant: 'danger' },
-] as const;
+// selection, Enter confirms it. Deny is selected by default (safer).
 
 export function PermissionWidget({ args, onRespond }: WidgetProps) {
   const tool = typeof args.tool === 'string' ? args.tool : 'tool';
   const summary = typeof args.summary === 'string' ? args.summary : null;
   const toolArgs = args.args as Record<string, unknown> | undefined;
+  const remember = args.remember as { label?: string } | undefined;
+  const rememberLabel =
+    typeof remember?.label === 'string' ? remember.label : null;
+
+  const options = useMemo(
+    () => [
+      { label: 'Deny', value: { granted: false }, variant: '' },
+      {
+        label: rememberLabel ? 'Allow once' : 'Allow',
+        value: { granted: true, scope: 'once' },
+        variant: 'danger',
+      },
+      ...(rememberLabel
+        ? [
+            {
+              label: rememberLabel,
+              value: { granted: true, scope: 'remember' },
+              variant: 'danger',
+            },
+          ]
+        : []),
+    ],
+    [rememberLabel],
+  );
 
   const [selected, setSelected] = useState(0); // default: Deny
   const rootRef = useRef<HTMLDivElement>(null);
@@ -29,13 +51,13 @@ export function PermissionWidget({ args, onRespond }: WidgetProps) {
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
       e.preventDefault();
-      setSelected((i) => (i - 1 + OPTIONS.length) % OPTIONS.length);
+      setSelected((i) => (i - 1 + options.length) % options.length);
     } else if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
       e.preventDefault();
-      setSelected((i) => (i + 1) % OPTIONS.length);
+      setSelected((i) => (i + 1) % options.length);
     } else if (e.key === 'Enter') {
       e.preventDefault();
-      onRespond({ ...OPTIONS[selected].value });
+      onRespond({ ...options[selected].value });
     }
     // Esc intentionally bubbles: ChatPane cancels the whole turn.
   };
@@ -57,7 +79,7 @@ export function PermissionWidget({ args, onRespond }: WidgetProps) {
         <pre className="widget__args">{JSON.stringify(toolArgs, null, 2)}</pre>
       )}
       <div className="widget__actions">
-        {OPTIONS.map((opt, i) => (
+        {options.map((opt, i) => (
           <button
             key={opt.label}
             type="button"
