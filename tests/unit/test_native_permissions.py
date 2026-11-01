@@ -10,8 +10,8 @@ import asyncio
 
 import pytest
 from copilot.generated.rpc import (
-    PermissionDecisionApproveForLocation,
     PermissionDecisionApproveForSession,
+    PermissionDecisionApproveForSessionApprovalWrite,
     PermissionDecisionApproveOnce,
     PermissionDecisionReject,
 )
@@ -300,16 +300,14 @@ async def _answer(handler, request, reply):
     return await task, payload
 
 
-async def test_write_remember_returns_approve_for_location():
-    handler = lambda b: build_permission_handler(  # noqa: E731
-        {"write": "ask"}, b, working_directory="/tmp"
-    )
+async def test_write_remember_returns_session_write():
+    handler = lambda b: build_permission_handler({"write": "ask"}, b)  # noqa: E731
     result, payload = await _answer(
         handler, _write("/tmp/x.py"), {"granted": True, "scope": "remember"}
     )
-    assert isinstance(result, PermissionDecisionApproveForLocation)
-    assert result.location_key  # git root / cwd fallback
-    assert payload["args"]["remember"]["label"].startswith("Always allow writes in")
+    assert isinstance(result, PermissionDecisionApproveForSession)
+    assert isinstance(result.approval, PermissionDecisionApproveForSessionApprovalWrite)
+    assert payload["args"]["remember"]["label"] == "Approve all writes this session"
 
 
 async def test_shell_remember_returns_session_commands():

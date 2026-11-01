@@ -37,15 +37,13 @@ The config decision maps onto native decisions:
 
 from __future__ import annotations
 
-import subprocess
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 from copilot.generated.rpc import (
-    PermissionDecisionApproveForLocation,
-    PermissionDecisionApproveForLocationApprovalWrite,
     PermissionDecisionApproveForSession,
     PermissionDecisionApproveForSessionApprovalCommands,
+    PermissionDecisionApproveForSessionApprovalWrite,
     PermissionDecisionApproveOnce,
     PermissionDecisionReject,
 )
@@ -137,50 +135,25 @@ class _Remember:
     decision: object
 
 
-def _git_root(path: str | None) -> str | None:
-    """The git top-level for `path` (or its directory), else `path` itself.
-
-    Used as the `location_key` for a persisted write grant — the SDK stores a
-    location grant under the project's git root / cwd, not a single file."""
-    if not path:
-        return None
-    try:
-        out = subprocess.run(
-            ["git", "-C", path, "rev-parse", "--show-toplevel"],
-            capture_output=True,
-            text=True,
-            timeout=2,
-        )
-        if out.returncode == 0 and out.stdout.strip():
-            return out.stdout.strip()
-    except (OSError, subprocess.SubprocessError):
-        pass
-    return path
-
-
-def _remember_option(
-    key: str, request: PermissionRequest, working_directory: str | None
-) -> _Remember | None:
+def _remember_option(key: str, request: PermissionRequest) -> _Remember | None:
     """The single "remember" grant offered for a request, or None when the kind
     offers no remembering (reads).
 
-    Each option's `label` states exactly what the native decision persists:
+    All remember grants are **session-scoped** — they last for the rest of this
+    session and nothing persists across sessions (cross-session grants are
+    deprecated as opaque and low-value). Each option's `label` states exactly
+    what it grants:
 
-      write -> ApproveForLocation(Write, git-root): all writes in the project
-               location, persisted across sessions.
+      write -> ApproveForSession(Write): all writes, for the rest of the session.
       shell -> ApproveForSession(Commands[...]): the specific command
-               identifier(s), for the rest of this session.
+               identifier(s), for the rest of the session.
       url   -> ApproveForSession(domain): calls to that domain, for the session.
     """
     if isinstance(request, PermissionRequestWrite):
-        location_key = _git_root(working_directory or request.resolved_path)
-        if not location_key:
-            return None
         return _Remember(
-            label=f"Always allow writes in {location_key}",
-            decision=PermissionDecisionApproveForLocation(
-                approval=PermissionDecisionApproveForLocationApprovalWrite(),
-                location_key=location_key,
+            label="Approve all writes this session",
+            decision=PermissionDecisionApproveForSession(
+                approval=PermissionDecisionApproveForSessionApprovalWrite()
             ),
         )
     if isinstance(request, PermissionRequestShell):
@@ -210,7 +183,6 @@ def _remember_option(
 def build_permission_handler(
     permissions: dict[str, str] | None,
     bridge: WidgetBridge | None,
-    working_directory: str | None = None,
 ):
     """Build the async `on_permission_request` handler for one turn.
 
@@ -244,7 +216,7 @@ def build_permission_handler(
         # offer a clearly-labelled persistent grant alongside allow-once.
         widget_id = _WIDGET_ID.get(key, "permission")
         payload = _widget_payload(key, request)
-        remember = _remember_option(key, request, working_directory)
+        remember = _remember_option(key, request)
         if remember is not None:
             payload["remember"] = {"label": remember.label}
         try:

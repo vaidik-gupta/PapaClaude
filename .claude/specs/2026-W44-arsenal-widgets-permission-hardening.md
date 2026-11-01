@@ -116,30 +116,31 @@ are captured here but may slip.
 
 ### Widget robustness (bites first in real use)
 
-1. **Remember grants / "allow all" [build]. ✅ DONE (built-in tools).** An
-   `ask`→allow can now stick, so a batch of calls isn't a prompt storm.
+1. **Remember grants / "allow all" [build]. ✅ DONE (built-in tools, session-scoped).**
+   An `ask`→allow can now stick for the session, so a batch of calls isn't a
+   prompt storm.
+   - **Cross-session grants — DEPRECATED.** Persisting grants across sessions
+     (`ApproveForLocation` / `ApprovePermanently`) is **out of scope**: it's
+     opaque (the CLI owns it in `~/.copilot`, invisible/unrevocable in our UI),
+     global-per-user (leaks across personas), and low-value. **All remember
+     grants are session-scoped only.**
    - **Landed (built-in tools, native path):** the permission + diff widgets show
-     a **third, scope-labelled** option whose text states exactly what persists
-     (no generic "allow for session"). On selection the native handler returns the
-     kind-specific decision; the Copilot runtime then stops re-prompting:
-     - **write** → `ApproveForLocation(Write, location_key=<git root>)` — "Always
-       allow writes in `<git root>`" (persisted across sessions; the SDK has no
-       per-file grant, only per project location).
+     a **third, scope-labelled** option whose text states exactly what it grants;
+     on selection the native handler returns the session-scoped decision and the
+     Copilot runtime stops re-prompting for the rest of the session:
+     - **write** → `ApproveForSession(Write)` — "Approve all writes this session".
      - **shell** → `ApproveForSession(Commands[identifiers])` — "Approve `<cmd>`
        commands this session" (per command identifier).
      - **url** → `ApproveForSession(domain=<host>)` — "Approve calls to `<host>`
        this session" (per domain).
-     - **read** → no remember option (once/deny only); reads don't advertise
-       session approval and the only session grant would be *all* reads.
+     - **read** → no remember option (once/deny only); the only session grant
+       would be *all* reads.
    - Scope flows as `{granted, scope: "once"|"remember"}`; `remember` →
-     kind-specific decision, `once` → `ApproveOnce`. Only offered when the request
-     exposes a sensible grant (`_remember_option`). Live-verified: url shows
-     "Approve calls to example.com this session", shell shows the command label;
-     both complete and the runtime remembers.
+     session decision, `once` → `ApproveOnce`. Only offered when the request
+     exposes a sensible grant (`_remember_option`). Live-verified end-to-end.
    - **Custom path (our tools) — DEPRECATED.** The per-turn remember on the
      `WidgetBridge` was an AI-introduced feature that was never required; it is
-     **removed from scope**. Custom tools stay once/deny for now; a custom-tool
-     remember mechanism can be revisited later if actually needed.
+     **removed from scope**. Custom tools stay once/deny for now.
 
 2. **Widget timeout — DROPPED.** ~~A pending widget must not hang a turn
    forever.~~ Product decision: **no timeouts.** A widget waits indefinitely for
@@ -323,9 +324,11 @@ Deferred to a later week: full turn replay (3, full), multi-worker widget store
   favor of a single `on_permission_request` handler for *both* built-in and
   custom tools. Worth it, or keep the two paths (custom = `gate_tools`, built-in
   = native hook) for W44 and revisit? (Lean: keep both this week, unify later.)
-- **Remember scope:** native `ApproveForSession`/`ApproveForLocation` (built-ins)
-  vs. our per-turn bridge set (custom) — do we expose both as one "Allow for this
-  turn/session" option, and should either persist back to the manifest as `auto`?
+- **Remember scope (RESOLVED):** **session-scoped only.** Remember grants return
+  native `ApproveForSession` (built-ins); cross-session grants
+  (`ApproveForLocation` / `ApprovePermanently`) are **deprecated** (opaque,
+  global-per-user, low-value) and the custom per-turn bridge set is **removed**.
+  Grants do not persist back to the manifest.
 - **Diff source of truth:** built-in writes hand us `diff` directly; our own
   future edit tools send a unified diff string. Widget just renders — confirmed.
 - **Tool name mapping (RESOLVED by live enumeration):** a live session registers

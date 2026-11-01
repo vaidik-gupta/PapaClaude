@@ -349,7 +349,7 @@ async def run_turn(
             queue.put_nowait(AgentEvent(EventType.RESULT, state.result_payload(session_id)))
 
     tools = _build_tools(owner, allowed_tools, role, conversation_id, permissions, bridge)
-    permission_handler = build_permission_handler(permissions, bridge, working_directory)
+    permission_handler = build_permission_handler(permissions, bridge)
     user_input_handler = build_user_input_handler(bridge)
     session = await _open_session(
         client,
